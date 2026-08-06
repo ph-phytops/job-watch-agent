@@ -1,0 +1,35 @@
+# --- Secrets : NE JAMAIS PUBLIER ---
+.env
+.env.*
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# --- Environnement virtuel Python ---
+.venv/
+venv/
+env/
+
+# --- Fichiers temporaires Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# --- Données et sorties locales ---
+data/
+output/
+logs/
+*.log
+*.db
+*.sqlite3
+*.csv
+
+# --- Système et éditeurs ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
