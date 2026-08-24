@@ -1,0 +1,72 @@
+# job-watch-agent configuration
+# Companies are watched through the public job-board APIs of their ATS
+# (Greenhouse, Lever or Ashby). No scraping, no authentication required.
+
+[search]
+# A job is kept if its title contains at least one of these terms...
+# (management titles only — context keywords like "infrastructure" belong
+# to the future scoring step, they match far too many engineering roles)
+include_keywords = [
+    "program manager",
+    "technical program",
+    "tpm",
+    "program management",
+    "project manager",
+    "chef de projet",
+]
+# ...and none of these.
+exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice"]
+
+# --- Targets -----------------------------------------------------------
+# ats: "greenhouse" | "lever" | "ashby"
+# slug: the company identifier in the ATS public API
+
+[[companies]]
+name = "Mistral AI"
+ats = "ashby"
+slug = "mistral.ai"
+
+[[companies]]
+name = "Anthropic"
+ats = "greenhouse"
+slug = "anthropic"
+
+[[companies]]
+name = "OpenAI"
+ats = "ashby"
+slug = "openai"
+
+[[companies]]
+name = "CoreWeave"
+ats = "greenhouse"
+slug = "coreweave"
+
+[[companies]]
+name = "Nebius"
+ats = "greenhouse"
+slug = "nebius"
+
+[[companies]]
+name = "Lambda"
+ats = "ashby"
+slug = "lambda"
+
+[[companies]]
+name = "Nscale"
+ats = "greenhouse"
+slug = "nscaleoperationsukltd"
+
+[[companies]]
+name = "Fireworks AI"
+ats = "ashby"
+slug = "fireworks"
+
+[[companies]]
+name = "H Company"
+ats = "ashby"
+slug = "hcompany"
+
+[[companies]]
+name = "Scaleway"
+ats = "lever"
+slug = "scaleway"

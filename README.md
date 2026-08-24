@@ -52,11 +52,13 @@ rather than left implicit.
 ## Roadmap
 
 - [x] Project scaffolding and reproducible environment
-- [ ] Source collection for a first job board
-- [ ] Posting normalisation
-- [ ] Profile definition and hard filters
-- [ ] Qualitative scoring
-- [ ] Daily digest output
+- [x] Source collection from public ATS APIs (Greenhouse, Lever, Ashby)
+- [x] Posting normalisation to a common shape
+- [x] Title keyword filtering (config-driven)
+- [x] Daily digest output (Markdown)
+- [ ] Memory: only surface postings not seen on previous runs
+- [ ] Location and seniority filters
+- [ ] Qualitative scoring against a candidate profile
 - [ ] Scheduled execution
 
 ## Getting started
@@ -68,7 +70,12 @@ cd job-watch-agent
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 source .venv/bin/activate     # macOS / Linux
+
+pip install -r requirements.txt
+python jobwatch.py            # writes digests/YYYY-MM-DD.md
 ```
+
+Edit `config.toml` to set your own target companies and keywords.
 
 ---
 
