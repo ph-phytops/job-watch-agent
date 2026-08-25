@@ -1,6 +1,7 @@
 # --- Secrets : NE JAMAIS PUBLIER ---
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 secrets.json
