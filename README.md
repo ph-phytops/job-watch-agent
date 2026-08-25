@@ -53,10 +53,12 @@ rather than left implicit.
 
 - [x] Project scaffolding and reproducible environment
 - [x] Source collection from public ATS APIs (Greenhouse, Lever, Ashby)
+- [x] Email-alert collection over IMAP (dedicated mailbox, read-only,
+      credentials in a gitignored `.env` — see `.env.example`)
 - [x] Posting normalisation to a common shape
 - [x] Title keyword filtering (config-driven)
 - [x] Daily digest output (Markdown)
-- [ ] Memory: only surface postings not seen on previous runs
+- [x] Memory: only surface postings not seen on previous runs
 - [ ] Location and seniority filters
 - [ ] Qualitative scoring against a candidate profile
 - [ ] Scheduled execution

@@ -14,14 +14,20 @@ Usage:
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
 import sys
 import tomllib
 from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
+
+from email_collector import fetch_email_jobs
 
 ROOT = Path(__file__).parent
 DIGEST_DIR = ROOT / "digests"
+SEEN_PATH = ROOT / "data" / "seen.json"
 TIMEOUT = 20
 HEADERS = {
     "User-Agent": "job-watch-agent/0.1 (personal project; "
@@ -106,6 +112,22 @@ def matches(job: dict, include: list[str], exclude: list[str]) -> bool:
 
 
 # --------------------------------------------------------------------------
+# Memory — URLs already surfaced by previous runs (data/seen.json, gitignored)
+# --------------------------------------------------------------------------
+
+
+def load_seen() -> set[str]:
+    if SEEN_PATH.exists():
+        return set(json.loads(SEEN_PATH.read_text(encoding="utf-8")))
+    return set()
+
+
+def save_seen(seen: set[str]) -> None:
+    SEEN_PATH.parent.mkdir(exist_ok=True)
+    SEEN_PATH.write_text(json.dumps(sorted(seen), indent=2), encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
 # Digest
 # --------------------------------------------------------------------------
 
@@ -118,9 +140,10 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
     lines = [
         f"# Job digest — {today}",
         "",
-        f"{len(jobs)} matching position(s) across "
-        f"{stats['companies_ok']}/{stats['companies_total']} companies "
-        f"({stats['jobs_total']} postings scanned).",
+        f"{len(jobs)} new matching position(s) — {stats['jobs_total']} postings "
+        f"scanned across {stats['companies_ok']}/{stats['companies_total']} "
+        f"companies and email alerts; {stats['already_seen']} matching "
+        f"position(s) already surfaced by previous runs.",
         "",
     ]
 
@@ -146,6 +169,7 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
 
 
 def main() -> int:
+    load_dotenv(ROOT / ".env")
     config = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
     include = [k.lower() for k in config["search"]["include_keywords"]]
     exclude = [k.lower() for k in config["search"]["exclude_keywords"]]
@@ -169,14 +193,49 @@ def main() -> int:
         kept.extend(matching)
         print(f"  [+] {name}: {len(jobs)} postings, {len(matching)} matching")
 
+    # ---- Email alerts (dedicated mailbox: LinkedIn, Indeed, ...) --------
+    email_cfg = config.get("email", {})
+    if email_cfg.get("enabled"):
+        user = os.environ.get("JOBWATCH_EMAIL_USER")
+        password = os.environ.get("JOBWATCH_EMAIL_PASSWORD")
+        if not (user and password):
+            errors.append(
+                "email alerts: credentials missing in .env "
+                "(JOBWATCH_EMAIL_USER / JOBWATCH_EMAIL_PASSWORD)"
+            )
+            print("  [!] email alerts: credentials missing in .env")
+        else:
+            try:
+                mail_jobs = fetch_email_jobs(email_cfg, user, password)
+            except Exception as exc:  # noqa: BLE001 — report and move on
+                errors.append(f"email alerts: {exc}")
+                print(f"  [!] email alerts: {exc}")
+            else:
+                jobs_total += len(mail_jobs)
+                matching = [j for j in mail_jobs if matches(j, include, exclude)]
+                kept.extend(matching)
+                print(
+                    f"  [+] email alerts: {len(mail_jobs)} job links, "
+                    f"{len(matching)} matching"
+                )
+
+    # ---- Memory: only surface what previous runs have not shown ---------
+    seen = load_seen()
+    new_jobs = [job for job in kept if job["url"] not in seen]
+
     stats = {
         "companies_total": len(config["companies"]),
         "companies_ok": companies_ok,
         "jobs_total": jobs_total,
+        "already_seen": len(kept) - len(new_jobs),
     }
-    path = write_digest(kept, errors, stats)
+    path = write_digest(new_jobs, errors, stats)
+    save_seen(seen | {job["url"] for job in kept})
     print(f"\nDigest written to {path.relative_to(ROOT)}")
-    print(f"{len(kept)} matching position(s) out of {jobs_total} scanned.")
+    print(
+        f"{len(new_jobs)} new matching position(s) "
+        f"({stats['already_seen']} already seen) out of {jobs_total} scanned."
+    )
     return 0
 
 

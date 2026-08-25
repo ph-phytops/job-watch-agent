@@ -17,6 +17,20 @@ include_keywords = [
 # ...and none of these.
 exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice"]
 
+# --- Email alerts ------------------------------------------------------
+# The agent also reads a dedicated mailbox receiving daily job alerts.
+# Credentials live in .env (never committed): JOBWATCH_EMAIL_USER /
+# JOBWATCH_EMAIL_PASSWORD. See .env.example.
+
+[email]
+enabled = true
+imap_host = "imap.gmail.com"
+since_days = 2
+# The mailbox is dedicated to job alerts: scan every recent message.
+# (Alerts may arrive forwarded, so filtering by sender is unreliable;
+# add entries here only if you need to narrow the search.)
+senders = []
+
 # --- Targets -----------------------------------------------------------
 # ats: "greenhouse" | "lever" | "ashby"
 # slug: the company identifier in the ATS public API
