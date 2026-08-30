@@ -25,7 +25,7 @@ jobs:
           JOBWATCH_EMAIL_USER: ${{ secrets.JOBWATCH_EMAIL_USER }}
           JOBWATCH_EMAIL_PASSWORD: ${{ secrets.JOBWATCH_EMAIL_PASSWORD }}
           JOBWATCH_NOTIFY_TO: ${{ secrets.JOBWATCH_NOTIFY_TO }}
-        run: uv run --frozen jobwatch.py
+        run: uv run --locked jobwatch.py
 
       - name: Commit new digest and memory
         run: |

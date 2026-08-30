@@ -17,8 +17,11 @@ uv lock                         # after editing pyproject.toml by hand
 ```
 
 `uv run` provisions Python 3.13 (from `.python-version`) and syncs `.venv` on
-its own, so there is no setup step. CI uses `uv run --frozen` so a stale lock
-fails the run instead of silently resolving something else.
+its own, so there is no setup step. Both schedulers use `uv run --locked`,
+which fails when `uv.lock` no longer matches `pyproject.toml` — edit the
+dependencies and forget `uv lock`, and the run stops instead of quietly
+ignoring the change. (`--frozen` is the flag that *skips* that check; it is
+not what we want here.)
 
 There is no test suite, linter config, or build step, and `jobwatch.py` is the
 only entry point.
@@ -32,9 +35,9 @@ real postings from the digest of the day, irreversibly (see Memory below).
 Scheduled execution exists in two places and both must stay in sync when the
 run command or the dependency install changes:
 
-- `.github/workflows/daily.yml` — cloud run at 06:30 UTC; `uv run --frozen`
+- `.github/workflows/daily.yml` — cloud run at 06:30 UTC; `uv run --locked`
   and commits the new digest and `data/seen.json` back to the repo.
-- `run_daily.cmd` — Windows Task Scheduler; `uv run --frozen`, appending to
+- `run_daily.cmd` — Windows Task Scheduler; `uv run --locked`, appending to
   `data/run.log`. uv must be on the PATH of the account running the task.
 
 ## Architecture
