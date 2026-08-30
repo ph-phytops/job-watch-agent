@@ -229,9 +229,12 @@ def main() -> int:
         "jobs_total": jobs_total,
         "already_seen": len(kept) - len(new_jobs),
     }
-    path = write_digest(new_jobs, errors, stats)
     save_seen(seen | {job["url"] for job in kept})
-    print(f"\nDigest written to {path.relative_to(ROOT)}")
+    if new_jobs:
+        path = write_digest(new_jobs, errors, stats)
+        print(f"\nDigest written to {path.relative_to(ROOT)}")
+    else:
+        print("\nNothing new — no digest written (previous one kept).")
     print(
         f"{len(new_jobs)} new matching position(s) "
         f"({stats['already_seen']} already seen) out of {jobs_total} scanned."

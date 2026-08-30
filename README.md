@@ -59,9 +59,10 @@ rather than left implicit.
 - [x] Title keyword filtering (config-driven)
 - [x] Daily digest output (Markdown)
 - [x] Memory: only surface postings not seen on previous runs
+- [x] Scheduled execution (Windows Task Scheduler → `run_daily.cmd`,
+      logs in `data/run.log`, catch-up run if the machine was off)
 - [ ] Location and seniority filters
 - [ ] Qualitative scoring against a candidate profile
-- [ ] Scheduled execution
 
 ## Getting started
 

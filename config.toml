@@ -25,7 +25,9 @@ exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice"]
 [email]
 enabled = true
 imap_host = "imap.gmail.com"
-since_days = 2
+# Generous overlap: the cross-run memory dedupes anyway, and a wide window
+# avoids missing alerts if a daily run is skipped.
+since_days = 4
 # The mailbox is dedicated to job alerts: scan every recent message.
 # (Alerts may arrive forwarded, so filtering by sender is unreliable;
 # add entries here only if you need to narrow the search.)

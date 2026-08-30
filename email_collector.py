@@ -19,6 +19,17 @@ from urllib.parse import unquote
 
 from bs4 import BeautifulSoup
 
+# Noise that LinkedIn appends after the job title inside the anchor text.
+_TITLE_NOISE = [
+    r"Recrutement actif",
+    r"Candidature simplifiée",
+    r"\(À distance\)",
+    r"\(Hybride\)",
+    r"\(Sur site\)",
+    r"\d+\s+relations?",
+    r"\d+\s+anciens?\s+collègues?",
+]
+
 # Anchor texts that are navigation, not job titles.
 _JUNK_TITLES = {
     "voir l'offre",
@@ -93,13 +104,37 @@ def _extract_jobs(html: str) -> list[dict]:
         canonical, source = _canonical_url(anchor["href"])
         if not canonical:
             continue
-        title = " ".join(anchor.get_text(" ", strip=True).split())
-        if len(title) < 5 or title.lower() in _JUNK_TITLES:
+        raw = " ".join(anchor.get_text(" ", strip=True).split())
+        if len(raw) < 5 or raw.lower() in _JUNK_TITLES:
+            continue
+        title, network = _clean_title(raw)
+        if len(title) < 5:
             continue
         found.append(
-            {"company": source, "title": title, "location": "", "url": canonical}
+            {"company": source, "title": title, "location": network, "url": canonical}
         )
     return found
+
+
+def _clean_title(raw: str) -> tuple[str, str]:
+    """Split a noisy LinkedIn card text into (clean title, network signal).
+
+    The 'N anciens collègues / relations' mention is a referral lead worth
+    keeping — it is returned separately instead of being thrown away.
+    """
+    network = ""
+    match = re.search(r"(\d+)\s+anciens?\s+collègues?", raw)
+    if match:
+        network = f"⭐ {match.group(1)} ancien(s) collègue(s)"
+    else:
+        match = re.search(r"(\d+)\s+relations?", raw)
+        if match:
+            network = f"{match.group(1)} relation(s)"
+
+    title = re.split(r"\s*·\s*", raw)[0]
+    for pattern in _TITLE_NOISE:
+        title = re.sub(pattern, "", title)
+    return " ".join(title.split()), network
 
 
 def _canonical_url(href: str) -> tuple[str | None, str]:
