@@ -61,6 +61,8 @@ rather than left implicit.
 - [x] Memory: only surface postings not seen on previous runs
 - [x] Scheduled execution (Windows Task Scheduler → `run_daily.cmd`,
       logs in `data/run.log`, catch-up run if the machine was off)
+- [x] Email notification: the digest lands in your inbox when new
+      positions are found
 - [ ] Location and seniority filters
 - [ ] Qualitative scoring against a candidate profile
 
@@ -79,6 +81,20 @@ python jobwatch.py            # writes digests/YYYY-MM-DD.md
 ```
 
 Edit `config.toml` to set your own target companies and keywords.
+
+## Running it for someone else
+
+Everything specific to a person lives in two files — no code changes needed:
+
+1. **`config.toml`** — their target companies (find the ATS and slug from the
+   careers page URL: `boards.greenhouse.io/<slug>`, `jobs.lever.co/<slug>`,
+   `jobs.ashbyhq.com/<slug>`) and their title keywords.
+2. **`.env`** — a dedicated Gmail mailbox receiving their job alerts
+   (LinkedIn/Indeed subscriptions or forwards), an app password, and the
+   address where the digest should be delivered. See `.env.example`.
+
+Then schedule `run_daily.cmd` (Windows Task Scheduler) or an equivalent cron
+job, and the agent works for them.
 
 ---
 

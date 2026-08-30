@@ -24,6 +24,7 @@ import requests
 from dotenv import load_dotenv
 
 from email_collector import fetch_email_jobs
+from notifier import send_digest
 
 ROOT = Path(__file__).parent
 DIGEST_DIR = ROOT / "digests"
@@ -233,6 +234,16 @@ def main() -> int:
     if new_jobs:
         path = write_digest(new_jobs, errors, stats)
         print(f"\nDigest written to {path.relative_to(ROOT)}")
+        if config.get("notify", {}).get("enabled"):
+            try:
+                send_digest(
+                    f"Job digest {dt.date.today().isoformat()} — "
+                    f"{len(new_jobs)} new position(s)",
+                    path.read_text(encoding="utf-8"),
+                )
+                print("Digest sent by email.")
+            except Exception as exc:  # noqa: BLE001 — notification is best-effort
+                print(f"  [!] email notification failed: {exc}")
     else:
         print("\nNothing new — no digest written (previous one kept).")
     print(

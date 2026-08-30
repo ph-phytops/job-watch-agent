@@ -33,6 +33,12 @@ since_days = 4
 # add entries here only if you need to narrow the search.)
 senders = []
 
+# --- Notification ------------------------------------------------------
+# When new positions are found, send the digest to JOBWATCH_NOTIFY_TO (.env).
+
+[notify]
+enabled = true
+
 # --- Targets -----------------------------------------------------------
 # ats: "greenhouse" | "lever" | "ashby"
 # slug: the company identifier in the ATS public API
