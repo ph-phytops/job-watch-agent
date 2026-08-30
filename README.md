@@ -44,7 +44,8 @@ These are deliberate, not accidental:
 ## Tech stack
 
 - Python 3.13
-- Isolated virtual environment (`.venv`)
+- [uv](https://docs.astral.sh/uv/) for dependencies and execution — `uv.lock`
+  is committed, so every run (local or CI) resolves to identical versions.
 
 Additional dependencies will be added as the scope firms up, and documented here
 rather than left implicit.
@@ -72,13 +73,12 @@ rather than left implicit.
 git clone https://github.com/ph-phytops/job-watch-agent.git
 cd job-watch-agent
 
-python -m venv .venv
-.venv\Scripts\activate        # Windows
-source .venv/bin/activate     # macOS / Linux
-
-pip install -r requirements.txt
-python jobwatch.py            # writes digests/YYYY-MM-DD.md
+uv run jobwatch.py            # writes digests/YYYY-MM-DD.md
 ```
+
+`uv run` provisions Python 3.13 and syncs the environment on its own, so there
+is no install step — [install uv](https://docs.astral.sh/uv/getting-started/installation/)
+and that one command is the whole setup.
 
 Edit `config.toml` to set your own target companies and keywords.
 

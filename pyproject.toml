@@ -1,0 +1,15 @@
+[project]
+name = "job-watch-agent"
+version = "0.1.0"
+description = "Daily agent collecting job postings from public ATS APIs and email alerts."
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "python-dotenv>=1.2.3",
+    "requests>=2.34.2",
+]
+
+# The repo is an application, not a distributable library: nothing to build,
+# uv only manages the environment.
+[tool.uv]
+package = false

@@ -5,22 +5,24 @@ code in this repository.
 
 ## Commands
 
-The project runs from a local virtual environment; `requirements.txt` is fully
-pinned and is the single source of truth for dependencies.
+Dependencies and execution go through **uv**; never use `pip` or activate a
+venv by hand, and never reintroduce `requirements.txt` — `uv.lock` is the
+single source of truth and is committed.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate       # macOS / Linux
-.venv\Scripts\activate          # Windows
-
-pip install -r requirements.txt
-python jobwatch.py              # the whole agent: collect -> filter -> digest -> notify
+uv run jobwatch.py              # the whole agent: collect -> filter -> digest -> notify
+uv add <package>                # adds to pyproject.toml and relocks
+uv lock                         # after editing pyproject.toml by hand
 ```
 
-Python 3.13. There is no test suite, linter config, or build step, and
-`jobwatch.py` is the only entry point.
+`uv run` provisions Python 3.13 (from `.python-version`) and syncs `.venv` on
+its own, so there is no setup step. CI uses `uv run --frozen` so a stale lock
+fails the run instead of silently resolving something else.
 
-**There is currently no dry-run mode.** Every `python jobwatch.py` is a real
+There is no test suite, linter config, or build step, and `jobwatch.py` is the
+only entry point.
+
+**There is currently no dry-run mode.** Every `uv run jobwatch.py` is a real
 run: it marks postings as seen, writes `digests/YYYY-MM-DD.md`, and — when
 `[notify].enabled` is true in `config.toml` — mails the digest. On a dev
 machine that means it consumes the postings that would otherwise appear in the
@@ -31,11 +33,10 @@ restore, or add a dry-run flag as a change of its own.
 Scheduled execution exists in two places and both must stay in sync when the
 run command or the dependency install changes:
 
-- `.github/workflows/daily.yml` — cloud run at 06:30 UTC; installs from
-  `requirements.txt` and commits the new digest and `data/seen.json` back to
-  the repo.
-- `run_daily.cmd` — Windows Task Scheduler; calls `.venv\Scripts\python.exe`
-  directly and appends to `data/run.log`.
+- `.github/workflows/daily.yml` — cloud run at 06:30 UTC; `uv run --frozen`
+  and commits the new digest and `data/seen.json` back to the repo.
+- `run_daily.cmd` — Windows Task Scheduler; `uv run --frozen`, appending to
+  `data/run.log`. uv must be on the PATH of the account running the task.
 
 ## Architecture
 
