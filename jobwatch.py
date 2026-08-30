@@ -254,23 +254,27 @@ def main() -> int:
         print("\n[dry run] nothing written, nothing sent. Would surface:")
         for job in sorted(new_jobs, key=lambda j: (j["company"], j["title"])):
             print(f"  - {job['company']} — {job['title']}")
-    else:
+    elif new_jobs:
+        # Order matters: marking a URL as seen is irreversible, so the memory
+        # is only saved once the digest is safely on disk. A crash in
+        # write_digest() leaves the postings for the next run.
+        path = write_digest(new_jobs, errors, stats)
+        print(f"\nDigest written to {path.relative_to(ROOT)}")
         save_seen(seen | {job["url"] for job in kept})
-        if new_jobs:
-            path = write_digest(new_jobs, errors, stats)
-            print(f"\nDigest written to {path.relative_to(ROOT)}")
-            if config.get("notify", {}).get("enabled"):
-                try:
-                    send_digest(
-                        f"Job digest {dt.datetime.now(ZoneInfo('Europe/Paris')).date().isoformat()} — "
-                        f"{len(new_jobs)} new position(s)",
-                        path.read_text(encoding="utf-8"),
-                    )
-                    print("Digest sent by email.")
-                except Exception as exc:  # noqa: BLE001 — notification is best-effort
-                    print(f"  [!] email notification failed: {exc}")
-        else:
-            print("\nNothing new — no digest written (previous one kept).")
+        # Notification comes last: the digest file is the durable record,
+        # mailing is best-effort and must not re-surface the postings.
+        if config.get("notify", {}).get("enabled"):
+            try:
+                send_digest(
+                    f"Job digest {dt.datetime.now(ZoneInfo('Europe/Paris')).date().isoformat()} — "
+                    f"{len(new_jobs)} new position(s)",
+                    path.read_text(encoding="utf-8"),
+                )
+                print("Digest sent by email.")
+            except Exception as exc:  # noqa: BLE001 — notification is best-effort
+                print(f"  [!] email notification failed: {exc}")
+    else:
+        print("\nNothing new — no digest written (previous one kept).")
     print(
         f"{len(new_jobs)} new matching position(s) "
         f"({stats['already_seen']} already seen) out of {jobs_total} scanned."

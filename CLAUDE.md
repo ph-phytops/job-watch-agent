@@ -75,10 +75,11 @@ the memory to persist across cloud runs. (The comment above `load_seen()` still
 calls it gitignored; that is stale.)
 
 Marking a job as seen is irreversible in practice: it will never appear in a
-future digest. Note that `main()` currently calls `save_seen()` **before**
-`write_digest()`, so a crash while writing the digest still loses that day's
-postings. Moving the save after the write is the fix if you touch this; until
-then, do not add failure-prone work between the two.
+future digest. So `save_seen()` runs **only after `write_digest()` has
+returned**, never before — a crash earlier in the run leaves the postings for
+the next one. Email notification stays after the save, because the digest file
+on disk is the durable record and mailing is best-effort. Keep that ordering
+when touching `main()`.
 
 ### Configuration and secrets
 
