@@ -11,6 +11,7 @@ single source of truth and is committed.
 
 ```bash
 uv run jobwatch.py              # the whole agent: collect -> filter -> digest -> notify
+uv run jobwatch.py --dry-run    # collect and filter only: writes nothing, sends nothing
 uv add <package>                # adds to pyproject.toml and relocks
 uv lock                         # after editing pyproject.toml by hand
 ```
@@ -22,13 +23,11 @@ fails the run instead of silently resolving something else.
 There is no test suite, linter config, or build step, and `jobwatch.py` is the
 only entry point.
 
-**There is currently no dry-run mode.** Every `uv run jobwatch.py` is a real
-run: it marks postings as seen, writes `digests/YYYY-MM-DD.md`, and — when
-`[notify].enabled` is true in `config.toml` — mails the digest. On a dev
-machine that means it consumes the postings that would otherwise appear in the
-day's digest, irreversibly (see Memory below). To iterate safely, set
-`[notify].enabled = false` and work from a copy of `data/seen.json` you can
-restore, or add a dry-run flag as a change of its own.
+**Use `--dry-run` for every local iteration.** It still hits the ATS APIs and
+the mailbox (IMAP is opened read-only), but leaves `digests/`, `data/seen.json`
+and the outbox untouched — so it cannot bury a posting in the memory or mail
+the user a test digest. A plain `uv run jobwatch.py` on a dev machine consumes
+real postings from the digest of the day, irreversibly (see Memory below).
 
 Scheduled execution exists in two places and both must stay in sync when the
 run command or the dependency install changes:
@@ -126,13 +125,13 @@ to be understood, it is the wrong change.
 instead of grepping for fragments, and do not dispatch subagents or parallel
 searches at this scale — the coordination costs more than the work.
 
-**4. Verify by running, not by reading.** This matters most for
-`email_collector.py`: the regexes in `_canonical_url()` and `_clean_title()`
-handle URL shapes and French LinkedIn card text that look obvious and are not.
-Test them against a real captured `href` or anchor string, and never claim a
-parsing change works because the pattern looks right. With no dry-run mode,
-prefer exercising a changed helper directly (a short `python -c` against a
-captured sample) over a full run that would consume the day's postings.
+**4. Verify by running, not by reading.** After any change, run
+`uv run jobwatch.py --dry-run` and report the real counts it prints. This
+matters most for `email_collector.py`: the regexes in `_canonical_url()` and
+`_clean_title()` handle URL shapes and French LinkedIn card text that look
+obvious and are not. Test them against a real captured `href` or anchor
+string, and never claim a parsing change works because the pattern looks
+right.
 
 ## Commits
 

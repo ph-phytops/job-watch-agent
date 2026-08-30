@@ -8,20 +8,22 @@ every posting to one common shape, keep the ones matching the search
 keywords, and write a Markdown digest in digests/.
 
 Usage:
-    python jobwatch.py
+    uv run jobwatch.py
+    uv run jobwatch.py --dry-run   # collect and filter only, change nothing
 """
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
-import tomllib
 from dotenv import load_dotenv
 
 from email_collector import fetch_email_jobs
@@ -177,6 +179,15 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Collect and report job postings.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="collect and filter only: no digest written, memory and mailbox "
+        "left untouched, no mail sent",
+    )
+    args = parser.parse_args()
+
     load_dotenv(ROOT / ".env")
     config = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
     include = [k.lower() for k in config["search"]["include_keywords"]]
@@ -237,22 +248,29 @@ def main() -> int:
         "jobs_total": jobs_total,
         "already_seen": len(kept) - len(new_jobs),
     }
-    save_seen(seen | {job["url"] for job in kept})
-    if new_jobs:
-        path = write_digest(new_jobs, errors, stats)
-        print(f"\nDigest written to {path.relative_to(ROOT)}")
-        if config.get("notify", {}).get("enabled"):
-            try:
-                send_digest(
-                    f"Job digest {dt.datetime.now(ZoneInfo('Europe/Paris')).date().isoformat()} — "
-                    f"{len(new_jobs)} new position(s)",
-                    path.read_text(encoding="utf-8"),
-                )
-                print("Digest sent by email.")
-            except Exception as exc:  # noqa: BLE001 — notification is best-effort
-                print(f"  [!] email notification failed: {exc}")
+    # A dry run stops here: it has read the boards and the mailbox, but must
+    # not remember anything, write a digest, or send mail.
+    if args.dry_run:
+        print("\n[dry run] nothing written, nothing sent. Would surface:")
+        for job in sorted(new_jobs, key=lambda j: (j["company"], j["title"])):
+            print(f"  - {job['company']} — {job['title']}")
     else:
-        print("\nNothing new — no digest written (previous one kept).")
+        save_seen(seen | {job["url"] for job in kept})
+        if new_jobs:
+            path = write_digest(new_jobs, errors, stats)
+            print(f"\nDigest written to {path.relative_to(ROOT)}")
+            if config.get("notify", {}).get("enabled"):
+                try:
+                    send_digest(
+                        f"Job digest {dt.datetime.now(ZoneInfo('Europe/Paris')).date().isoformat()} — "
+                        f"{len(new_jobs)} new position(s)",
+                        path.read_text(encoding="utf-8"),
+                    )
+                    print("Digest sent by email.")
+                except Exception as exc:  # noqa: BLE001 — notification is best-effort
+                    print(f"  [!] email notification failed: {exc}")
+        else:
+            print("\nNothing new — no digest written (previous one kept).")
     print(
         f"{len(new_jobs)} new matching position(s) "
         f"({stats['already_seen']} already seen) out of {jobs_total} scanned."
