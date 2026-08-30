@@ -16,6 +16,7 @@ import imaplib
 import re
 from email.message import Message
 from urllib.parse import unquote
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 
@@ -48,7 +49,9 @@ _JUNK_TITLES = {
 
 def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
     """Return normalised jobs found in recent alert emails."""
-    since = dt.date.today() - dt.timedelta(days=cfg.get("since_days", 2))
+    since = dt.datetime.now(ZoneInfo("Europe/Paris")).date() - dt.timedelta(
+        days=cfg.get("since_days", 2)
+    )
     since_imap = since.strftime("%d-%b-%Y")
 
     # The mailbox is dedicated to job alerts, so by default we scan every

@@ -18,6 +18,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 import tomllib
@@ -132,7 +133,7 @@ def save_seen(seen: set[str]) -> None:
 
 
 def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
-    today = dt.date.today().isoformat()
+    today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
     DIGEST_DIR.mkdir(exist_ok=True)
     path = DIGEST_DIR / f"{today}.md"
 
@@ -243,7 +244,7 @@ def main() -> int:
         if config.get("notify", {}).get("enabled"):
             try:
                 send_digest(
-                    f"Job digest {dt.date.today().isoformat()} — "
+                    f"Job digest {dt.datetime.now(ZoneInfo('Europe/Paris')).date().isoformat()} — "
                     f"{len(new_jobs)} new position(s)",
                     path.read_text(encoding="utf-8"),
                 )
