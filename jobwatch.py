@@ -17,10 +17,10 @@ import datetime as dt
 import json
 import os
 import sys
-import tomllib
 from pathlib import Path
 
 import requests
+import tomllib
 from dotenv import load_dotenv
 
 from email_collector import fetch_email_jobs
@@ -107,9 +107,7 @@ def matches(job: dict, include: list[str], exclude: list[str]) -> bool:
     title = job["title"].lower()
     if not any(keyword in title for keyword in include):
         return False
-    if any(keyword in title for keyword in exclude):
-        return False
-    return True
+    return not any(keyword in title for keyword in exclude)
 
 
 # --------------------------------------------------------------------------
@@ -138,13 +136,21 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
     DIGEST_DIR.mkdir(exist_ok=True)
     path = DIGEST_DIR / f"{today}.md"
 
+    summary = " ".join(
+        [
+            f"{len(jobs)} new matching position(s) —",
+            f"{stats['jobs_total']} postings scanned across",
+            f"{stats['companies_ok']}/{stats['companies_total']} companies",
+            "and email alerts;",
+            f"{stats['already_seen']} matching position(s)",
+            "already surfaced by previous runs.",
+        ]
+    )
+
     lines = [
         f"# Job digest — {today}",
         "",
-        f"{len(jobs)} new matching position(s) — {stats['jobs_total']} postings "
-        f"scanned across {stats['companies_ok']}/{stats['companies_total']} "
-        f"companies and email alerts; {stats['already_seen']} matching "
-        f"position(s) already surfaced by previous runs.",
+        summary,
         "",
     ]
 
