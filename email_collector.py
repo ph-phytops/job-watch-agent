@@ -16,6 +16,7 @@ import imaplib
 import re
 from email.message import Message
 from urllib.parse import unquote
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 
@@ -48,7 +49,9 @@ _JUNK_TITLES = {
 
 def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
     """Return normalised jobs found in recent alert emails."""
-    since = dt.date.today() - dt.timedelta(days=cfg.get("since_days", 2))
+    since = dt.datetime.now(ZoneInfo("Europe/Paris")).date() - dt.timedelta(
+        days=cfg.get("since_days", 2)
+    )
     since_imap = since.strftime("%d-%b-%Y")
 
     # The mailbox is dedicated to job alerts, so by default we scan every
@@ -63,13 +66,19 @@ def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
     with imaplib.IMAP4_SSL(cfg.get("imap_host", "imap.gmail.com")) as imap:
         imap.login(user, password)
         imap.select("INBOX", readonly=True)
-        message_ids: set[bytes] = set()
+
+        message_ids: set[str] = set()
         for query in queries:
             _, data = imap.search(None, query)
-            message_ids.update(data[0].split())
+            raw_ids = data[0]
+            if raw_ids:
+                message_ids.update(raw_ids.decode().split())
         for msg_id in message_ids:
             _, msg_data = imap.fetch(msg_id, "(RFC822)")
-            message = email.message_from_bytes(msg_data[0][1])
+            part = msg_data[0] if msg_data else None
+            if not isinstance(part, tuple):
+                continue
+            message = email.message_from_bytes(part[1])
             body = _html_body(message)
             if body:
                 html_bodies.append(body)
@@ -87,12 +96,17 @@ def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
 
 def _html_body(message: Message) -> str:
     """Return the decoded text/html part of an email, or an empty string."""
-    parts = message.walk() if message.is_multipart() else [message]
-    for part in parts:
-        if part.get_content_type() == "text/html":
-            payload = part.get_payload(decode=True)
-            charset = part.get_content_charset() or "utf-8"
+    for part in message.walk():
+        if part.get_content_type() != "text/html":
+            continue
+        payload = part.get_payload(decode=True)
+        if not isinstance(payload, bytes):
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        try:
             return payload.decode(charset, errors="replace")
+        except LookupError:
+            return payload.decode("utf-8", errors="replace")
     return ""
 
 
@@ -101,7 +115,10 @@ def _extract_jobs(html: str) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     found = []
     for anchor in soup.find_all("a", href=True):
-        canonical, source = _canonical_url(anchor["href"])
+        href = anchor.get("href")
+        if not isinstance(href, str):
+            continue
+        canonical, source = _canonical_url(href)
         if not canonical:
             continue
         raw = " ".join(anchor.get_text(" ", strip=True).split())

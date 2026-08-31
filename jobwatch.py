@@ -8,17 +8,20 @@ every posting to one common shape, keep the ones matching the search
 keywords, and write a Markdown digest in digests/.
 
 Usage:
-    python jobwatch.py
+    uv run jobwatch.py
+    uv run jobwatch.py --dry-run   # collect and filter only, change nothing
 """
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import json
 import os
 import sys
 import tomllib
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
@@ -108,9 +111,7 @@ def matches(job: dict, include: list[str], exclude: list[str]) -> bool:
     title = job["title"].lower()
     if not any(keyword in title for keyword in include):
         return False
-    if any(keyword in title for keyword in exclude):
-        return False
-    return True
+    return not any(keyword in title for keyword in exclude)
 
 
 # --------------------------------------------------------------------------
@@ -136,17 +137,25 @@ def save_seen(seen: set[str]) -> None:
 
 def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
     """jobs must arrive scored (job["score"], job["why"]) and sorted."""
-    today = dt.date.today().isoformat()
+    today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
     DIGEST_DIR.mkdir(exist_ok=True)
     path = DIGEST_DIR / f"{today}.md"
+
+    summary = " ".join(
+        [
+            f"{len(jobs)} new matching position(s) —",
+            f"{stats['jobs_total']} postings scanned across",
+            f"{stats['companies_ok']}/{stats['companies_total']} companies",
+            "and email alerts;",
+            f"{stats['already_seen']} matching position(s)",
+            "already surfaced by previous runs.",
+        ]
+    )
 
     lines = [
         f"# Job digest — {today}",
         "",
-        f"{len(jobs)} new matching position(s) — {stats['jobs_total']} postings "
-        f"scanned across {stats['companies_ok']}/{stats['companies_total']} "
-        f"companies and email alerts; {stats['already_seen']} matching "
-        f"position(s) already surfaced by previous runs.",
+        summary,
         "",
     ]
 
@@ -195,6 +204,15 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Collect and report job postings.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="collect and filter only: no digest written, memory and mailbox "
+        "left untouched, no mail sent",
+    )
+    args = parser.parse_args()
+
     load_dotenv(ROOT / ".env")
     config = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
     include = [k.lower() for k in config["search"]["include_keywords"]]
@@ -261,14 +279,25 @@ def main() -> int:
         "jobs_total": jobs_total,
         "already_seen": len(kept) - len(new_jobs),
     }
-    save_seen(seen | {job["url"] for job in kept})
-    if new_jobs:
+    # A dry run stops here: it has read the boards and the mailbox, but must
+    # not remember anything, write a digest, or send mail.
+    if args.dry_run:
+        print("\n[dry run] nothing written, nothing sent. Would surface:")
+        for job in sorted(new_jobs, key=lambda j: (j["company"], j["title"])):
+            print(f"  - {job['company']} — {job['title']}")
+    elif new_jobs:
+        # Order matters: marking a URL as seen is irreversible, so the memory
+        # is only saved once the digest is safely on disk. A crash in
+        # write_digest() leaves the postings for the next run.
         path = write_digest(new_jobs, errors, stats)
         print(f"\nDigest written to {path.relative_to(ROOT)}")
+        save_seen(seen | {job["url"] for job in kept})
+        # Notification comes last: the digest file is the durable record,
+        # mailing is best-effort and must not re-surface the postings.
         if config.get("notify", {}).get("enabled"):
             try:
                 send_digest(
-                    f"Job digest {dt.date.today().isoformat()} — "
+                    f"Job digest {dt.datetime.now(ZoneInfo('Europe/Paris')).date().isoformat()} — "
                     f"{len(new_jobs)} new position(s)",
                     path.read_text(encoding="utf-8"),
                 )
