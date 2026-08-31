@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 from email_collector import fetch_email_jobs
 from notifier import send_digest
+from scoring import score_job
 
 ROOT = Path(__file__).parent
 DIGEST_DIR = ROOT / "digests"
@@ -134,6 +135,7 @@ def save_seen(seen: set[str]) -> None:
 
 
 def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
+    """jobs must arrive scored (job["score"], job["why"]) and sorted."""
     today = dt.date.today().isoformat()
     DIGEST_DIR.mkdir(exist_ok=True)
     path = DIGEST_DIR / f"{today}.md"
@@ -148,16 +150,39 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
         "",
     ]
 
-    current_company = None
-    for job in sorted(jobs, key=lambda j: (j["company"], j["title"])):
-        if job["company"] != current_company:
-            current_company = job["company"]
-            lines += [f"## {current_company}", ""]
-        location = f" — {job['location']}" if job["location"] else ""
-        lines.append(f"- [{job['title']}]({job['url']}){location}")
+    top = jobs[:10]
+    if top:
+        lines += ["## 🥇 Top 3", ""]
+        for rank, job in enumerate(top[:3], start=1):
+            where = f" — {job['location']}" if job["location"] else ""
+            lines += [
+                f"### {rank}. [{job['title']}]({job['url']}) "
+                f"— {job['company']}{where}",
+                f"**Score {job['score']}** : {' · '.join(job['why']) or '—'}",
+                "",
+            ]
+        lines += ["## Top 10", ""]
+        for rank, job in enumerate(top, start=1):
+            lines.append(
+                f"{rank}. ({job['score']}) [{job['title']}]({job['url']}) "
+                f"— {job['company']}"
+            )
+        lines.append("")
+
+    rest = jobs[10:]
+    if rest:
+        lines += [f"## Autres nouveautés ({len(rest)})", ""]
+        current_company = None
+        for job in sorted(rest, key=lambda j: (j["company"], j["title"])):
+            if job["company"] != current_company:
+                current_company = job["company"]
+                lines += [f"### {current_company}", ""]
+            location = f" — {job['location']}" if job["location"] else ""
+            lines.append(f"- [{job['title']}]({job['url']}){location}")
+        lines.append("")
 
     if errors:
-        lines += ["", "## Collection errors", ""]
+        lines += ["## Collection errors", ""]
         lines += [f"- {error}" for error in errors]
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -223,6 +248,12 @@ def main() -> int:
     # ---- Memory: only surface what previous runs have not shown ---------
     seen = load_seen()
     new_jobs = [job for job in kept if job["url"] not in seen]
+
+    # ---- Scoring: transparent ranking, best first ------------------------
+    scoring_cfg = config.get("scoring", {})
+    for job in new_jobs:
+        job["score"], job["why"] = score_job(job, scoring_cfg)
+    new_jobs.sort(key=lambda job: job["score"], reverse=True)
 
     stats = {
         "companies_total": len(config["companies"]),

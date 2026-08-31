@@ -63,8 +63,9 @@ rather than left implicit.
       logs in `data/run.log`, catch-up run if the machine was off)
 - [x] Email notification: the digest lands in your inbox when new
       positions are found
-- [ ] Location and seniority filters
-- [ ] Qualitative scoring against a candidate profile
+- [x] Transparent scoring and ranking (config-driven weights; every point
+      is explained in the digest — Top 3 with reasons, Top 10, the rest)
+- [ ] LLM-based qualitative scoring (deep-reading job descriptions)
 
 ## Getting started
 

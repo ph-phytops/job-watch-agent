@@ -15,7 +15,7 @@ include_keywords = [
     "chef de projet",
 ]
 # ...and none of these.
-exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice"]
+exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice", "stagiaire"]
 
 # --- Email alerts ------------------------------------------------------
 # The agent also reads a dedicated mailbox receiving daily job alerts.
@@ -92,3 +92,92 @@ slug = "hcompany"
 name = "Scaleway"
 ats = "lever"
 slug = "scaleway"
+
+[[companies]]
+name = "Databricks"
+ats = "greenhouse"
+slug = "databricks"
+
+[[companies]]
+name = "Scale AI"
+ats = "greenhouse"
+slug = "scaleai"
+
+[[companies]]
+name = "xAI"
+ats = "greenhouse"
+slug = "xai"
+
+[[companies]]
+name = "Cohere"
+ats = "ashby"
+slug = "cohere"
+
+# Google, Microsoft, AWS and Meta have proprietary career sites without a
+# public ATS API: they are covered through LinkedIn per-company email alerts
+# (zero code) and boosted by the scoring section below when they appear.
+
+# --- Scoring -----------------------------------------------------------
+# Transparent, additive scoring: every point appears in the digest with its
+# reason. Title keywords accumulate; company and location keep only their
+# single best match.
+
+[scoring.title]
+"technical program" = 30
+"tpm" = 30
+"program manager" = 25
+"datacenter" = 25
+"data center" = 25
+"data centre" = 25
+"infrastructure" = 20
+"capacity" = 20
+"compute" = 15
+"deployment" = 15
+"freelance" = 10
+"cloud" = 10
+"project manager" = 10
+"senior" = 5
+"director" = -10
+"junior" = -15
+
+[scoring.company]
+"Mistral AI" = 30
+"Anthropic" = 25
+"CoreWeave" = 25
+"OpenAI" = 25
+"Nebius" = 22
+"Databricks" = 22
+"Lambda" = 20
+"Nscale" = 20
+"Google" = 20
+"Microsoft" = 18
+"Meta" = 18
+"AWS" = 18
+"Amazon" = 15
+"Scale AI" = 15
+"Cohere" = 15
+"xAI" = 15
+"Scaleway" = 12
+"Fireworks" = 12
+
+[scoring.location]
+"remote" = 30
+"à distance" = 30
+"télétravail" = 25
+"paris" = 25
+"france" = 20
+"emea" = 15
+"europe" = 15
+"hybride" = 10
+"london" = 5
+"amsterdam" = 5
+"new york" = -15
+"san francisco" = -15
+"sunnyvale" = -15
+"seattle" = -15
+"bellevue" = -15
+
+[scoring.extras]
+network_bonus = 15   # "N anciens collègues / relations" in the alert
+rate_threshold = 600 # €/day
+rate_bonus = 10

@@ -153,4 +153,13 @@ def _canonical_url(href: str) -> tuple[str | None, str]:
         if match:
             url = f"https://fr.indeed.com/viewjob?jk={match.group(1)}"
             return url, "Indeed (alerte email)"
+    match = re.search(r"(https?://(?:www\.)?free-work\.com/[^\s\"'>]*job[^\s\"'>]*)", href)
+    if match:
+        return match.group(1).split("?")[0], "Free-Work (alerte email)"
+    match = re.search(r"(https?://(?:www\.)?collective\.work/[^\s\"'>]+)", href)
+    if match:
+        url = match.group(1).split("?")[0]
+        # Skip navigation links (homepage, login...) — keep deep mission links.
+        if len(url.rstrip("/").split("/")) > 4:
+            return url, "Collective (alerte email)"
     return None, ""
