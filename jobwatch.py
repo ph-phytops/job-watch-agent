@@ -24,9 +24,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 from email_collector import fetch_email_jobs
+from llm_review import load_profile, render, review, unavailable
 from notifier import send_digest
 from scoring import score_job
 
@@ -45,8 +47,14 @@ HEADERS = {
 # --------------------------------------------------------------------------
 
 
-def fetch_greenhouse(company: str, slug: str) -> list[dict]:
+def fetch_greenhouse(
+    company: str, slug: str, content: bool = False
+) -> list[dict]:
     url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+    if content:
+        # Same single request, larger payload: the full description ships
+        # with the listing. Only asked for when --llm is going to read it.
+        url += "?content=true"
     data = _get_json(url)
     return [
         {
@@ -54,12 +62,13 @@ def fetch_greenhouse(company: str, slug: str) -> list[dict]:
             "title": job.get("title", ""),
             "location": (job.get("location") or {}).get("name", ""),
             "url": job.get("absolute_url", ""),
+            "content": _plain_text(job.get("content", "")) if content else "",
         }
         for job in data.get("jobs", [])
     ]
 
 
-def fetch_lever(company: str, slug: str) -> list[dict]:
+def fetch_lever(company: str, slug: str, content: bool = False) -> list[dict]:
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
     data = _get_json(url)
     return [
@@ -68,12 +77,13 @@ def fetch_lever(company: str, slug: str) -> list[dict]:
             "title": job.get("text", ""),
             "location": (job.get("categories") or {}).get("location", ""),
             "url": job.get("hostedUrl", ""),
+            "content": job.get("descriptionPlain", "") if content else "",
         }
         for job in data
     ]
 
 
-def fetch_ashby(company: str, slug: str) -> list[dict]:
+def fetch_ashby(company: str, slug: str, content: bool = False) -> list[dict]:
     url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
     data = _get_json(url)
     return [
@@ -82,6 +92,8 @@ def fetch_ashby(company: str, slug: str) -> list[dict]:
             "title": job.get("title", ""),
             "location": job.get("location", ""),
             "url": job.get("jobUrl", ""),
+            # Ashby ships descriptionPlain in the listing we already download.
+            "content": job.get("descriptionPlain", "") if content else "",
         }
         for job in data.get("jobs", [])
     ]
@@ -92,6 +104,11 @@ FETCHERS = {
     "lever": fetch_lever,
     "ashby": fetch_ashby,
 }
+
+
+def _plain_text(html: str) -> str:
+    """Flatten an ATS description to readable text for the model."""
+    return BeautifulSoup(html or "", "html.parser").get_text("\n", strip=True)
 
 
 def _get_json(url: str):
@@ -211,10 +228,26 @@ def main() -> int:
         help="collect and filter only: no digest written, memory and mailbox "
         "left untouched, no mail sent",
     )
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="local qualitative pass: read the finalists' full descriptions, "
+        "write data/review-<date>.md, touch no shared state",
+    )
     args = parser.parse_args()
 
     load_dotenv(ROOT / ".env")
     config = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
+
+    # Fail before the collection, not after: --llm downloads full descriptions,
+    # so an unusable configuration must stop the run immediately.
+    llm_cfg = config.get("llm", {})
+    if args.llm:
+        reason = unavailable(llm_cfg, ROOT)
+        if reason:
+            print(f"[llm] cannot run: {reason}")
+            return 1
+
     include = [k.lower() for k in config["search"]["include_keywords"]]
     exclude = [k.lower() for k in config["search"]["exclude_keywords"]]
 
@@ -226,7 +259,7 @@ def main() -> int:
     for target in config["companies"]:
         name, ats, slug = target["name"], target["ats"], target["slug"]
         try:
-            jobs = FETCHERS[ats](name, slug)
+            jobs = FETCHERS[ats](name, slug, args.llm)
         except Exception as exc:  # noqa: BLE001 — report and move on
             errors.append(f"{name} ({ats}/{slug}): {exc}")
             print(f"  [!] {name}: {exc}")
@@ -279,9 +312,25 @@ def main() -> int:
         "jobs_total": jobs_total,
         "already_seen": len(kept) - len(new_jobs),
     }
+    # --llm stops here: it reviews what is OPEN (not only what is new — the
+    # scheduled cloud run has already consumed "new"), writes a local report,
+    # and touches no shared state.
+    if args.llm:
+        for job in kept:
+            job["score"], job["why"] = score_job(job, scoring_cfg)
+        kept.sort(key=lambda job: job["score"], reverse=True)
+        top = kept[: llm_cfg.get("top_n", 10)]
+        print(f"\n[llm] reading {len(top)} full description(s)...")
+        verdicts = review(top, llm_cfg, load_profile(llm_cfg, ROOT))
+        today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
+        path = SEEN_PATH.parent / f"review-{today}.md"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(render(top, verdicts, today), encoding="utf-8")
+        print(f"Review written to {path.relative_to(ROOT)} "
+              f"(gitignored; memory and digests untouched)")
     # A dry run stops here: it has read the boards and the mailbox, but must
     # not remember anything, write a digest, or send mail.
-    if args.dry_run:
+    elif args.dry_run:
         print("\n[dry run] nothing written, nothing sent. Would surface:")
         for job in sorted(new_jobs, key=lambda j: (j["company"], j["title"])):
             print(f"  - {job['company']} — {job['title']}")

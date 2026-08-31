@@ -12,6 +12,7 @@ single source of truth and is committed.
 ```bash
 uv run jobwatch.py              # the whole agent: collect -> filter -> digest -> notify
 uv run jobwatch.py --dry-run    # collect and filter only: writes nothing, sends nothing
+uv run jobwatch.py --llm        # local qualitative pass on the finalists (see below)
 uv add <package>                # adds to pyproject.toml and relocks
 uv lock                         # after editing pyproject.toml by hand
 ```
@@ -47,7 +48,11 @@ Four stages, all driven from `main()` in `jobwatch.py`:
 1. **Collect** — one fetcher per ATS (`fetch_greenhouse`, `fetch_lever`,
    `fetch_ashby`), registered in the `FETCHERS` dict keyed by the `ats` field
    in `config.toml`. Adding a board means adding a function with the same
-   signature `(company, slug) -> list[dict]` and one `FETCHERS` entry.
+   signature `(company, slug, content=False) -> list[dict]` and one
+   `FETCHERS` entry. `content=True` is only ever passed by `--llm`: it asks
+   the ATS for the full description in the same request (Greenhouse
+   `?content=true`, Ashby and Lever `descriptionPlain`), and costs nothing
+   on a normal run because it is not requested.
    `email_collector.fetch_email_jobs` is a parallel collector reading a
    dedicated IMAP mailbox of job alerts.
 2. **Normalise** — every collector returns the same four-key shape
@@ -60,6 +65,22 @@ Four stages, all driven from `main()` in `jobwatch.py`:
    README reserves location/seniority/qualitative scoring for a later stage.
 4. **Report** — `write_digest()` writes `digests/YYYY-MM-DD.md` grouped by
    company, then `notifier.send_digest()` mails it via Gmail SMTP.
+
+5. **Review (optional, `--llm`)** — a local-only qualitative pass. The
+   deterministic scorer ranks thousands of *titles* for free; `llm_review.py`
+   then reads the full *descriptions* of the top `[llm].top_n` only and pipes
+   them into the CLI named by `[llm].command`. It reviews what is **open**,
+   not what is new — the scheduled cloud run has already consumed "new" — and
+   writes `data/review-<date>.md`, which is gitignored.
+
+   **`--llm` never runs in CI and never writes shared state**: no digest, no
+   `data/seen.json`, no mail. That is deliberate. The cloud run stays free,
+   credential-free and fully explainable; the expensive read happens on the
+   machine of whoever has twenty minutes to act on it. The candidate profile
+   the model screens against lives at `[llm].profile_path` (default
+   `data/profile.md`, gitignored) — never in `config.toml`, which is public.
+   Copy `profile.example.md` to start one. Any failure is non-fatal: the run
+   reports it and the deterministic ranking stands.
 
 Collector failures never abort the run: each is caught, appended to `errors`,
 and surfaced in a "Collection errors" section of the digest.

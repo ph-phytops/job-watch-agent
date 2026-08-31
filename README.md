@@ -76,6 +76,7 @@ cd job-watch-agent
 
 uv run jobwatch.py            # writes digests/YYYY-MM-DD.md
 uv run jobwatch.py --dry-run  # preview only: writes nothing, sends nothing
+uv run jobwatch.py --llm      # local: read the finalists' full descriptions
 ```
 
 `uv run` provisions Python 3.13 and syncs the environment on its own, so there

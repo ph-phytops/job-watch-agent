@@ -181,3 +181,17 @@ slug = "cohere"
 network_bonus = 15   # "N anciens collègues / relations" in the alert
 rate_threshold = 600 # €/day
 rate_bonus = 10
+
+# --------------------------------------------------------------------------
+# Optional qualitative pass — LOCAL ONLY (`uv run jobwatch.py --llm`).
+#
+# The scheduled cloud run never touches this: it stays deterministic, free
+# and credential-free. The model reads the full descriptions of the finalists
+# only, on the machine of whoever has twenty minutes to act on the result.
+# --------------------------------------------------------------------------
+[llm]
+command = "claude"                 # CLI the prompt is piped into (must be on PATH)
+args = ["-p"]                      # non-interactive mode
+top_n = 10                         # finalists whose description gets read
+max_chars = 6000                   # per-posting budget sent to the model
+profile_path = "data/profile.md"   # gitignored: your profile never gets published
