@@ -109,9 +109,28 @@ def _parse(raw: str) -> list[dict]:
 
 
 def review(jobs: list[dict], cfg: dict, profile: str) -> dict[str, dict]:
-    """Return {url: verdict} for the given jobs; {} if anything goes wrong."""
+    """Return {url: verdict} for the given jobs, reviewed in batches.
+
+    One posting carries several thousand characters of description, so a large
+    sweep is split: fifty in a single prompt degrades the per-posting judgement
+    and risks a truncated answer that no longer parses. A batch that fails is
+    reported and skipped; the others still return their verdicts.
+    """
     if not jobs:
         return {}
+    size = max(1, cfg.get("batch_size", 10))
+    if len(jobs) > size:
+        verdicts: dict[str, dict] = {}
+        batches = [jobs[i:i + size] for i in range(0, len(jobs), size)]
+        for number, batch in enumerate(batches, start=1):
+            print(f"  batch {number}/{len(batches)} ({len(batch)} postings)...")
+            verdicts.update(_review_one(batch, cfg, profile))
+        return verdicts
+    return _review_one(jobs, cfg, profile)
+
+
+def _review_one(jobs: list[dict], cfg: dict, profile: str) -> dict[str, dict]:
+    """One model call over one batch."""
     command = [command_for(cfg), *cfg.get("args", [])]
     try:
         result = subprocess.run(

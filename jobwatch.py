@@ -234,6 +234,13 @@ def main() -> int:
         help="local qualitative pass: read the finalists' full descriptions, "
         "write data/review-<date>.md, touch no shared state",
     )
+    parser.add_argument(
+        "--top",
+        type=int,
+        metavar="N",
+        help="with --llm: review the N best-scoring open postings instead of "
+        "[llm].top_n. Use it for a one-off sweep of the backlog",
+    )
     args = parser.parse_args()
 
     load_dotenv(ROOT / ".env")
@@ -319,8 +326,9 @@ def main() -> int:
         for job in kept:
             job["score"], job["why"] = score_job(job, scoring_cfg)
         kept.sort(key=lambda job: job["score"], reverse=True)
-        top = kept[: llm_cfg.get("top_n", 10)]
-        print(f"\n[llm] reading {len(top)} full description(s)...")
+        top = kept[: args.top or llm_cfg.get("top_n", 10)]
+        print(f"\n[llm] reading {len(top)} full description(s) "
+              f"out of {len(kept)} open matches...")
         verdicts = review(top, llm_cfg, load_profile(llm_cfg, ROOT))
         today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
         path = SEEN_PATH.parent / f"review-{today}.md"

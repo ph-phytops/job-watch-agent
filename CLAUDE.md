@@ -13,6 +13,7 @@ single source of truth and is committed.
 uv run jobwatch.py              # the whole agent: collect -> filter -> digest -> notify
 uv run jobwatch.py --dry-run    # collect and filter only: writes nothing, sends nothing
 uv run jobwatch.py --llm        # local qualitative pass on the finalists (see below)
+uv run jobwatch.py --llm --top 40   # one-off sweep: review the 40 best-scoring open postings
 uv add <package>                # adds to pyproject.toml and relocks
 uv lock                         # after editing pyproject.toml by hand
 ```
@@ -71,7 +72,13 @@ Four stages, all driven from `main()` in `jobwatch.py`:
    then reads the full *descriptions* of the top `[llm].top_n` only and pipes
    them into the CLI named by `[llm].command`. It reviews what is **open**,
    not what is new — the scheduled cloud run has already consumed "new" — and
-   writes `data/review-<date>.md`, which is gitignored.
+   writes `data/review-<date>.md`, which is gitignored. `--top N` overrides `top_n` for a
+   one-off sweep of the backlog: the pass ranks every open match, not only what is new,
+   so raising N reaches postings the daily digest surfaced once and never showed again.
+   Above `[llm].batch_size` (default 10) the postings are reviewed in successive calls:
+   fifty descriptions in a single prompt degrade the per-posting judgement and risk a
+   truncated answer that no longer parses. A batch that fails is reported and skipped,
+   the others still return their verdicts.
 
    **`--llm` never runs in CI and never writes shared state**: no digest, no
    `data/seen.json`, no mail. That is deliberate. The cloud run stays free,

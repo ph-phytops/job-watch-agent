@@ -13,6 +13,13 @@ include_keywords = [
     "program management",
     "project manager",
     "chef de projet",
+    "solutions architect",
+    "solutions engineer",
+    "forward deployed",
+    "technical account",
+    "partnerships manager",
+    "alliances",
+
 ]
 # ...and none of these.
 exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice", "stagiaire"]
@@ -139,6 +146,11 @@ slug = "cohere"
 "senior" = 5
 "director" = -10
 "junior" = -15
+"forward deployed" = 30
+"solutions architect" = 25
+"technical account" = 20
+"partnerships" = 20
+
 
 [scoring.company]
 "Mistral AI" = 30
@@ -195,3 +207,4 @@ args = ["-p"]                      # non-interactive mode
 top_n = 10                         # finalists whose description gets read
 max_chars = 6000                   # per-posting budget sent to the model
 profile_path = "data/profile.md"   # gitignored: your profile never gets published
+batch_size = 10                    # offres par appel au modele (un lot qui echoue n'annule pas les autres)
