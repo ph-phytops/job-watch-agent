@@ -19,9 +19,31 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 
+# --- Profils : un dossier par personne ---
+# Un profil contient les critères de recherche, la mémoire, les digests et les
+# identifiants de quelqu'un. Tous sont ignorés SAUF celui du propriétaire du
+# dépôt, dont les digests et la mémoire doivent être committés par le run
+# cloud pour persister d'un jour sur l'autre.
+# On exclut "profiles/*" et non "profiles/", sinon git ne descend pas dans le
+# dossier et la ré-inclusion ci-dessous serait sans effet.
+# Les règles .env et data/* plus bas continuent de s'appliquer à l'intérieur.
+# Gabarit public : profiles.example/
+profiles/*
+!profiles/pierre/
+
+# La règle "data/*" plus bas est ancrée à la RACINE du dépôt et ne descend pas
+# dans profiles/. Sans les deux lignes qui suivent, le profil personnel lu par
+# le modèle et les rapports --llm seraient publiés.
+profiles/*/data/*
+!profiles/*/data/seen.json
+
 # --- Données et sorties locales ---
-data/*
-!data/seen.json
+# Il n'y a plus de dossier data/ à la racine : chaque profil a le sien, couvert
+# par les règles profiles/ ci-dessus. Le slash de tête ANCRE la règle à la
+# racine : sans lui elle s'appliquerait aussi à profiles/<nom>/data/ et
+# exclurait le dossier entier, ce qui empêcherait le run cloud de committer
+# seen.json. Elle ne reste que comme filet si un outil recrée data/ à la racine.
+/data/
 output/
 logs/
 *.log

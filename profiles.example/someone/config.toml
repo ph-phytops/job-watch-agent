@@ -1,0 +1,79 @@
+# Template for running the agent for someone else.
+#
+#   cp -r profiles.example/someone profiles/<name>
+#   # edit this file, add profiles/<name>/.env, write profiles/<name>/data/profile.md
+#   uv run jobwatch.py --profile <name>
+#
+# profiles/ is gitignored: another person's criteria, memory, digests and
+# credentials never reach this public repository. Only this template is tracked.
+#
+# Everything is read from and written to profiles/<name>/ :
+#   config.toml        this file
+#   .env               JOBWATCH_EMAIL_USER / _PASSWORD / _NOTIFY_TO
+#   data/seen.json     memory, created on first run
+#   data/profile.md    candidate profile for --llm (see profile.example.md)
+#   digests/           daily reports
+#
+# TWO THINGS THAT BITE:
+#
+# 1. matches() does SUBSTRING matching on the lowercased title. A short
+#    keyword catches every word containing it: "rse" matches "course",
+#    "diverse", "bourse". Always prefer the long form.
+#
+# 2. TOML scoping. If the person has no ATS target, "companies = []" must sit
+#    ABOVE every [section] header, otherwise it becomes a key of the section
+#    above it and the run fails with a KeyError.
+
+[search]
+include_keywords = ["job title", "another title"]
+exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice", "stagiaire"]
+
+[email]
+enabled = true
+imap_host = "imap.gmail.com"
+since_days = 4
+senders = []
+
+[notify]
+enabled = true
+
+# --- Targets ------------------------------------------------------------
+# Only Greenhouse, Lever and Ashby are supported. Most employers outside tech
+# use neither, so CHECK BEFORE WRITING THE LIST: open the company careers page
+# and look for boards.greenhouse.io, jobs.lever.co or jobs.ashbyhq.com.
+# If none of the targets qualify, use "companies = []" at the top of the file
+# and rely entirely on email alerts.
+
+[[companies]]
+name = "Example"
+ats = "greenhouse"
+slug = "example"
+
+# --- Scoring ------------------------------------------------------------
+# Additive and explainable: every point appears in the digest with its reason.
+# Title keywords accumulate; company and location keep their best match only.
+
+[scoring.title]
+"senior" = 5
+"junior" = -15
+
+[scoring.company]
+"Example" = 20
+
+[scoring.location]
+"paris" = 25
+"remote" = 30
+
+[scoring.extras]
+network_bonus = 15
+rate_threshold = 600
+rate_bonus = 10
+
+# --- Optional LLM pass, LOCAL ONLY --------------------------------------
+[llm]
+command = "claude"
+args = ["-p"]
+top_n = 10
+max_chars = 6000
+profile_path = "data/profile.md"
+batch_size = 10

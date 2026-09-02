@@ -1,4 +1,4 @@
-"""job-watch-agent v0.1 — collect job postings from public ATS APIs.
+"""job-watch-agent v0.1: collect job postings from public ATS APIs.
 
 Pipeline: collect -> normalise -> filter -> digest.
 
@@ -33,6 +33,9 @@ from notifier import send_digest
 from scoring import score_job
 
 ROOT = Path(__file__).parent
+# BASE is where one person's data lives. It stays ROOT unless --profile names
+# another one, in which case main() repoints it at profiles/<name>/.
+BASE = ROOT
 DIGEST_DIR = ROOT / "digests"
 SEEN_PATH = ROOT / "data" / "seen.json"
 TIMEOUT = 20
@@ -42,7 +45,7 @@ HEADERS = {
 }
 
 # --------------------------------------------------------------------------
-# Collectors — one per ATS. Each returns a list of "normalised" jobs:
+# Collectors, one per ATS. Each returns a list of "normalised" jobs:
 # {"company", "title", "location", "url"}
 # --------------------------------------------------------------------------
 
@@ -132,7 +135,8 @@ def matches(job: dict, include: list[str], exclude: list[str]) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Memory — URLs already surfaced by previous runs (data/seen.json, gitignored)
+# Memory: URLs already surfaced by previous runs
+# (profiles/<name>/data/seen.json)
 # --------------------------------------------------------------------------
 
 
@@ -160,7 +164,7 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
 
     summary = " ".join(
         [
-            f"{len(jobs)} new matching position(s) —",
+            f"{len(jobs)} new matching position(s) out of",
             f"{stats['jobs_total']} postings scanned across",
             f"{stats['companies_ok']}/{stats['companies_total']} companies",
             "and email alerts;",
@@ -170,7 +174,7 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
     )
 
     lines = [
-        f"# Job digest — {today}",
+        f"# Job digest {today}",
         "",
         summary,
         "",
@@ -180,18 +184,19 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
     if top:
         lines += ["## 🥇 Top 3", ""]
         for rank, job in enumerate(top[:3], start=1):
-            where = f" — {job['location']}" if job["location"] else ""
+            where = f" · {job['location']}" if job["location"] else ""
             lines += [
                 f"### {rank}. [{job['title']}]({job['url']}) "
-                f"— {job['company']}{where}",
-                f"**Score {job['score']}** : {' · '.join(job['why']) or '—'}",
+                f"· {job['company']}{where}",
+                f"**Score {job['score']}** : "
+                f"{' · '.join(job['why']) or 'no rule matched'}",
                 "",
             ]
         lines += ["## Top 10", ""]
         for rank, job in enumerate(top, start=1):
             lines.append(
                 f"{rank}. ({job['score']}) [{job['title']}]({job['url']}) "
-                f"— {job['company']}"
+                f"· {job['company']}"
             )
         lines.append("")
 
@@ -203,7 +208,7 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
             if job["company"] != current_company:
                 current_company = job["company"]
                 lines += [f"### {current_company}", ""]
-            location = f" — {job['location']}" if job["location"] else ""
+            location = f" · {job['location']}" if job["location"] else ""
             lines.append(f"- [{job['title']}]({job['url']}){location}")
         lines.append("")
 
@@ -241,16 +246,51 @@ def main() -> int:
         help="with --llm: review the N best-scoring open postings instead of "
         "[llm].top_n. Use it for a one-off sweep of the backlog",
     )
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="run for another person: read everything from profiles/NAME/ "
+        "(config.toml, .env, profile.md) and write its memory and digests "
+        "there. Omit it to run the default profile at the repository root",
+    )
     args = parser.parse_args()
 
-    load_dotenv(ROOT / ".env")
-    config = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
+    # A profile is one person's whole setup (config, secrets, memory, digests,
+    # candidate profile) under profiles/<name>/. profiles/ is gitignored except
+    # for the repository owner's, so nobody else's search criteria can reach
+    # this public repository. Every run needs one: there is no default profile
+    # at the repository root, and the guard below says so instead of raising.
+    global BASE, DIGEST_DIR, SEEN_PATH
+    if args.profile:
+        BASE = ROOT / "profiles" / args.profile
+        if not BASE.is_dir():
+            print(f"[profile] {BASE.relative_to(ROOT)} does not exist. "
+                  f"Copy profiles.example/someone/ to create it.")
+            return 1
+        DIGEST_DIR = BASE / "digests"
+        SEEN_PATH = BASE / "data" / "seen.json"
+        print(f"[profile] {args.profile}")
+
+    # A profile reads its OWN .env and never falls back to the root one. The
+    # fallback looks harmless and is not: a profile without credentials would
+    # silently open someone else's mailbox and mail them someone else's digest.
+    # Missing credentials are reported by the email collector and the run
+    # continues on its ATS targets.
+    load_dotenv(BASE / ".env")
+
+    config_path = BASE / "config.toml"
+    if not config_path.is_file():
+        print(f"[config] {config_path.relative_to(ROOT)} not found. Every run "
+              f"needs a profile: copy profiles.example/someone/ to "
+              f"profiles/<name>/ and pass --profile <name>.")
+        return 1
+    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
 
     # Fail before the collection, not after: --llm downloads full descriptions,
     # so an unusable configuration must stop the run immediately.
     llm_cfg = config.get("llm", {})
     if args.llm:
-        reason = unavailable(llm_cfg, ROOT)
+        reason = unavailable(llm_cfg, BASE)
         if reason:
             print(f"[llm] cannot run: {reason}")
             return 1
@@ -267,7 +307,7 @@ def main() -> int:
         name, ats, slug = target["name"], target["ats"], target["slug"]
         try:
             jobs = FETCHERS[ats](name, slug, args.llm)
-        except Exception as exc:  # noqa: BLE001 — report and move on
+        except Exception as exc:  # noqa: BLE001, report and move on
             errors.append(f"{name} ({ats}/{slug}): {exc}")
             print(f"  [!] {name}: {exc}")
             continue
@@ -291,7 +331,7 @@ def main() -> int:
         else:
             try:
                 mail_jobs = fetch_email_jobs(email_cfg, user, password)
-            except Exception as exc:  # noqa: BLE001 — report and move on
+            except Exception as exc:  # noqa: BLE001, report and move on
                 errors.append(f"email alerts: {exc}")
                 print(f"  [!] email alerts: {exc}")
             else:
@@ -319,9 +359,9 @@ def main() -> int:
         "jobs_total": jobs_total,
         "already_seen": len(kept) - len(new_jobs),
     }
-    # --llm stops here: it reviews what is OPEN (not only what is new — the
-    # scheduled cloud run has already consumed "new"), writes a local report,
-    # and touches no shared state.
+    # --llm stops here: it reviews what is OPEN, not only what is new, since
+    # the scheduled cloud run has already consumed "new". It writes a local
+    # report and touches no shared state.
     if args.llm:
         for job in kept:
             job["score"], job["why"] = score_job(job, scoring_cfg)
@@ -329,7 +369,7 @@ def main() -> int:
         top = kept[: args.top or llm_cfg.get("top_n", 10)]
         print(f"\n[llm] reading {len(top)} full description(s) "
               f"out of {len(kept)} open matches...")
-        verdicts = review(top, llm_cfg, load_profile(llm_cfg, ROOT))
+        verdicts = review(top, llm_cfg, load_profile(llm_cfg, BASE))
         today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
         path = SEEN_PATH.parent / f"review-{today}.md"
         path.parent.mkdir(exist_ok=True)
@@ -341,7 +381,7 @@ def main() -> int:
     elif args.dry_run:
         print("\n[dry run] nothing written, nothing sent. Would surface:")
         for job in sorted(new_jobs, key=lambda j: (j["company"], j["title"])):
-            print(f"  - {job['company']} — {job['title']}")
+            print(f"  - {job['company']} · {job['title']}")
     elif new_jobs:
         # Order matters: marking a URL as seen is irreversible, so the memory
         # is only saved once the digest is safely on disk. A crash in
@@ -354,15 +394,15 @@ def main() -> int:
         if config.get("notify", {}).get("enabled"):
             try:
                 send_digest(
-                    f"Job digest {dt.datetime.now(ZoneInfo('Europe/Paris')).date().isoformat()} — "
+                    f"Job digest {dt.datetime.now(ZoneInfo('Europe/Paris')).date().isoformat()}: "
                     f"{len(new_jobs)} new position(s)",
                     path.read_text(encoding="utf-8"),
                 )
                 print("Digest sent by email.")
-            except Exception as exc:  # noqa: BLE001 — notification is best-effort
+            except Exception as exc:  # noqa: BLE001, notification is best-effort
                 print(f"  [!] email notification failed: {exc}")
     else:
-        print("\nNothing new — no digest written (previous one kept).")
+        print("\nNothing new, no digest written (previous one kept).")
     print(
         f"{len(new_jobs)} new matching position(s) "
         f"({stats['already_seen']} already seen) out of {jobs_total} scanned."

@@ -4,7 +4,7 @@
 
 [search]
 # A job is kept if its title contains at least one of these terms...
-# (management titles only — context keywords like "infrastructure" belong
+# (management titles only, since context keywords like "infrastructure" belong
 # to the future scoring step, they match far too many engineering roles)
 include_keywords = [
     "program manager",
@@ -13,22 +13,20 @@ include_keywords = [
     "program management",
     "project manager",
     "chef de projet",
-    # Adjacence GTM technique (ajoutée le 01/09) : les postes client-facing
-    # où le profil hybride business et technique se valorise.
-    "solutions architect",
-    "solutions engineer",
-    "forward deployed",
-    "technical account",
-    "partnerships",
-    "alliances",
 ]
+# Adjacence GTM technique (solutions architect, forward deployed, technical
+# account, partnerships) testée le 01/09 puis retirée le 02/09 : sur les 14
+# cibles, elle n'a produit que deux offres, toutes deux aux États-Unis et
+# écartées à la lecture, pour un bruit multiplié par vingt (Databricks est
+# passé de 16 à 305 correspondances). Les postes GTM de ces sociétés sont
+# aux États-Unis ; en chercher en France demanderait d'autres cibles.
 # ...and none of these.
 exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice", "stagiaire"]
 
 # --- Email alerts ------------------------------------------------------
 # The agent also reads a dedicated mailbox receiving daily job alerts.
 # Credentials live in .env (never committed): JOBWATCH_EMAIL_USER /
-# JOBWATCH_EMAIL_PASSWORD. See .env.example.
+# JOBWATCH_EMAIL_PASSWORD. See profiles.example/someone/.env.example.
 
 [email]
 enabled = true
@@ -147,10 +145,6 @@ slug = "cohere"
 "senior" = 5
 "director" = -10
 "junior" = -15
-"forward deployed" = 30
-"solutions architect" = 25
-"technical account" = 20
-"partnerships" = 20
 
 
 [scoring.company]
@@ -196,7 +190,7 @@ rate_threshold = 600 # €/day
 rate_bonus = 10
 
 # --------------------------------------------------------------------------
-# Optional qualitative pass — LOCAL ONLY (`uv run jobwatch.py --llm`).
+# Optional qualitative pass, LOCAL ONLY (`uv run jobwatch.py --llm`).
 #
 # The scheduled cloud run never touches this: it stays deterministic, free
 # and credential-free. The model reads the full descriptions of the finalists

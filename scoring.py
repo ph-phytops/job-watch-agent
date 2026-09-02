@@ -1,4 +1,4 @@
-"""Transparent job scoring — every point is explainable.
+"""Transparent job scoring: every point is explainable.
 
 score_job() returns (score, reasons): the digest shows WHY a job ranks
 where it does, in line with the project's "explicit scoring" constraint
@@ -47,6 +47,8 @@ def score_job(job: dict, cfg: dict) -> tuple[int, list[str]]:
         reasons.append(f"réseau {points:+d}")
 
     # Daily rate visible in the title (Free-Work shows €/day openly).
+    # The en dash below is DATA, not prose: boards write day rates both as
+    # "500-600 EUR/j" and "500–600 EUR/j". Do not "clean" it away.
     match = re.search(r"(\d{3,4})\s*(?:-|–|à)?\s*\d*\s*€\s*/?\s*j", title)
     if match and int(match.group(1)) >= extras.get("rate_threshold", 600):
         points = extras.get("rate_bonus", 10)

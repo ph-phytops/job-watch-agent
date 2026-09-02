@@ -1,4 +1,4 @@
-# Daily cloud run — the agent no longer depends on any personal machine.
+# Daily cloud run: the agent no longer depends on any personal machine.
 # Secrets (mailbox credentials) live in the repository's Actions secrets.
 name: daily-digest
 
@@ -25,12 +25,12 @@ jobs:
           JOBWATCH_EMAIL_USER: ${{ secrets.JOBWATCH_EMAIL_USER }}
           JOBWATCH_EMAIL_PASSWORD: ${{ secrets.JOBWATCH_EMAIL_PASSWORD }}
           JOBWATCH_NOTIFY_TO: ${{ secrets.JOBWATCH_NOTIFY_TO }}
-        run: uv run --locked jobwatch.py
+        run: uv run --locked jobwatch.py --profile pierre
 
       - name: Commit new digest and memory
         run: |
           git config user.name "job-watch-agent"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add digests data/seen.json
+          git add profiles/pierre/digests profiles/pierre/data/seen.json
           git diff --cached --quiet || git commit -m "Daily digest ($(date -u +%F))"
           git push

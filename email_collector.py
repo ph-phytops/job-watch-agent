@@ -137,7 +137,7 @@ def _clean_title(raw: str) -> tuple[str, str]:
     """Split a noisy LinkedIn card text into (clean title, network signal).
 
     The 'N anciens collègues / relations' mention is a referral lead worth
-    keeping — it is returned separately instead of being thrown away.
+    keeping: it is returned separately instead of being thrown away.
     """
     network = ""
     match = re.search(r"(\d+)\s+anciens?\s+collègues?", raw)
@@ -158,7 +158,7 @@ def _canonical_url(href: str) -> tuple[str | None, str]:
     """Strip tracking noise; return (canonical_url, source_label).
 
     Forwarded emails often wrap links (e.g. Outlook SafeLinks) with the real
-    URL percent-encoded inside — decoding twice uncovers it.
+    URL percent-encoded inside, so decoding twice uncovers it.
     """
     href = unquote(unquote(href))
     match = re.search(r"linkedin\.com/(?:comm/)?jobs/view/(\d+)", href)
@@ -176,7 +176,7 @@ def _canonical_url(href: str) -> tuple[str | None, str]:
     match = re.search(r"(https?://(?:www\.)?collective\.work/[^\s\"'>]+)", href)
     if match:
         url = match.group(1).split("?")[0]
-        # Skip navigation links (homepage, login...) — keep deep mission links.
+        # Skip navigation links (homepage, login...), keep deep mission links.
         if len(url.rstrip("/").split("/")) > 4:
             return url, "Collective (alerte email)"
     return None, ""

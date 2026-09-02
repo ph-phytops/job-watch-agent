@@ -1,4 +1,4 @@
-"""Qualitative LLM pass over the best-scoring postings — local only.
+"""Qualitative LLM pass over the best-scoring postings, local only.
 
 scoring.py ranks thousands of *titles* for free and explains every point.
 This module reads the actual job *descriptions*, but only for the finalists:
@@ -26,7 +26,7 @@ TIMEOUT = 300
 
 INSTRUCTIONS = """\
 You screen job postings for one candidate. Answer with a JSON array and \
-nothing else — no prose, no markdown fence.
+nothing else: no prose, no markdown fence.
 
 One object per posting, in the same order:
 {
@@ -34,15 +34,15 @@ One object per posting, in the same order:
   "verdict": "apply" | "dig" | "skip",
   "fit": ["2-3 requirements the candidate clearly meets"],
   "gaps": ["requirements the candidate genuinely does not meet"],
-  "soft_gap": "<a requirement that LOOKS disqualifying but is not — a \
+  "soft_gap": "<a requirement that LOOKS disqualifying but is not: a \
 certification required only after hire, an indicative years-of-experience \
 range, a scope stated as a ceiling rather than a floor. Empty string if none.>",
   "note": "<one sentence: the angle to lead with, or why to skip>"
 }
 
 Be blunt about real gaps: a padded assessment wastes the candidate's week. \
-But the "soft_gap" field matters as much — this candidate has a documented \
-habit of self-rejecting on requirements that do not actually exclude him.\
+But the "soft_gap" field matters as much: candidates routinely rule \
+themselves out on requirements that do not actually exclude them.\
 """
 
 
@@ -68,11 +68,11 @@ def unavailable(cfg: dict, root: Path) -> str | None:
     if not command:
         return "no [llm].command set in config.toml"
     if shutil.which(command) is None:
-        return (f"{command!r} not found — set [llm].command, or "
+        return (f"{command!r} not found. Set [llm].command, or "
                 "JOBWATCH_LLM_COMMAND in .env to an absolute path")
     if not load_profile(cfg, root).strip():
         path = cfg.get("profile_path", "data/profile.md")
-        return f"{path} is missing or empty (it is gitignored — write your own)"
+        return f"{path} is missing or empty (it is gitignored, write your own)"
     return None
 
 
@@ -162,7 +162,7 @@ ORDER = {"apply": 0, "dig": 1, "skip": 2}
 def render(jobs: list[dict], verdicts: dict[str, dict], date: str) -> str:
     """Render the reviewed jobs as Markdown, most actionable first."""
     lines = [
-        f"# Job review — {date}",
+        f"# Job review {date}",
         "",
         f"{len(verdicts)} posting(s) read in full by the model, out of "
         f"{len(jobs)} finalists ranked by the deterministic scorer.",
@@ -177,10 +177,10 @@ def render(jobs: list[dict], verdicts: dict[str, dict], date: str) -> str:
     )
     for job in ranked:
         verdict = verdicts.get(job["url"])
-        where = f" — {job['location']}" if job.get("location") else ""
+        where = f" · {job['location']}" if job.get("location") else ""
         if not verdict:
             lines += [
-                f"## ⚪ [{job['title']}]({job['url']}) — {job['company']}{where}",
+                f"## ⚪ [{job['title']}]({job['url']}) · {job['company']}{where}",
                 "",
                 "_Not reviewed by the model._",
                 "",
@@ -190,7 +190,7 @@ def render(jobs: list[dict], verdicts: dict[str, dict], date: str) -> str:
             verdict.get("verdict", ""), "⚪"
         )
         lines += [
-            f"## {badge} — [{job['title']}]({job['url']}) — "
+            f"## {badge} · [{job['title']}]({job['url']}) · "
             f"{job['company']}{where}",
             "",
             f"**Score {job.get('score', '?')}** · {verdict.get('note', '')}",
