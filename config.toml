@@ -13,13 +13,14 @@ include_keywords = [
     "program management",
     "project manager",
     "chef de projet",
+    # Adjacence GTM technique (ajoutée le 01/09) : les postes client-facing
+    # où le profil hybride business et technique se valorise.
     "solutions architect",
     "solutions engineer",
     "forward deployed",
     "technical account",
-    "partnerships manager",
+    "partnerships",
     "alliances",
-
 ]
 # ...and none of these.
 exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice", "stagiaire"]
