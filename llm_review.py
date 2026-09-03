@@ -145,8 +145,12 @@ def _review_one(jobs: list[dict], cfg: dict, profile: str) -> dict[str, dict]:
         print(f"  [!] LLM call failed: {exc}")
         return {}
     if result.returncode != 0:
+        # The CLI reports API-level failures ("API Error: 529 Overloaded",
+        # rate limits) on stdout, not stderr. Reading stderr alone printed an
+        # empty reason and left a transient outage looking like a bug.
+        detail = (result.stderr or "").strip() or (result.stdout or "").strip()
         print(f"  [!] {command_for(cfg)} exited {result.returncode}: "
-              f"{(result.stderr or '').strip()[:200]}")
+              f"{detail[:200] or 'no output'}")
         return {}
     try:
         verdicts = _parse(result.stdout)
