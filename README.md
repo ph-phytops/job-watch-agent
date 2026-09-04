@@ -67,7 +67,9 @@ rather than left implicit.
       positions are found
 - [x] Transparent scoring and ranking (config-driven weights; every point
       is explained in the digest: Top 3 with reasons, Top 10, the rest)
-- [ ] LLM-based qualitative scoring (deep-reading job descriptions)
+- [x] Qualitative pass over the finalists' full descriptions (`--llm`),
+      local and on demand: it reads what is open rather than what is new,
+      writes a gitignored review, and never runs in CI
 
 ## Getting started
 
@@ -86,6 +88,27 @@ uv run jobwatch.py --profile me --llm --top 40   # one-off sweep of the backlog
 `uv run` provisions Python 3.13 and syncs the environment on its own, so there
 is no install step. [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
 and that one command is the whole setup.
+
+### The `--llm` pass needs a CLI
+
+`--llm` pipes the descriptions into a local CLI, named by `[llm].command`
+and defaulting to `claude`
+([install](https://code.claude.com/docs/en/setup)). Check that it answers
+from your shell before using the flag:
+
+```bash
+claude --version
+```
+
+If it is not on your PATH, point `JOBWATCH_LLM_COMMAND` at an absolute path
+in the profile's `.env`, never in `config.toml`, which is committed. Prefer
+a path with no version number in it: a binary that ships inside an editor
+extension moves on every update, and the pass then stops with `not found`
+until someone edits that path again.
+
+Without a usable CLI the pass refuses to start and says why, before a single
+description is downloaded. The scheduled run never calls it, so nothing else
+is affected.
 
 ## Profiles
 
