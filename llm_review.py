@@ -53,6 +53,22 @@ def command_for(cfg: dict) -> str:
     return os.environ.get("JOBWATCH_LLM_COMMAND") or cfg.get("command", "")
 
 
+def resolve_command(cfg: dict) -> str:
+    """Absolute path of the CLI to launch, or "" when it cannot be found.
+
+    Launch through the resolved path, never through the bare name. Windows'
+    CreateProcess only ever appends ".exe", so a name that resolves to a shim
+    (npm installs "claude.cmd", not "claude.exe") satisfies shutil.which() and
+    then dies in subprocess.run() with WinError 2. Checking with one and
+    launching with the other made unavailable() report the pass as ready for a
+    command that cannot start, and every batch then failed after the
+    descriptions had already been downloaded."""
+    command = command_for(cfg)
+    if not command:
+        return ""
+    return shutil.which(command) or ""
+
+
 def load_profile(cfg: dict, root: Path) -> str:
     """Read the candidate profile. It lives outside config.toml on purpose:
     config.toml is committed and public, the profile is not."""
@@ -67,7 +83,7 @@ def unavailable(cfg: dict, root: Path) -> str | None:
     command = command_for(cfg)
     if not command:
         return "no [llm].command set in config.toml"
-    if shutil.which(command) is None:
+    if not resolve_command(cfg):
         return (f"{command!r} not found. Set [llm].command, or "
                 "JOBWATCH_LLM_COMMAND in .env to an absolute path")
     if not load_profile(cfg, root).strip():
@@ -131,7 +147,11 @@ def review(jobs: list[dict], cfg: dict, profile: str) -> dict[str, dict]:
 
 def _review_one(jobs: list[dict], cfg: dict, profile: str) -> dict[str, dict]:
     """One model call over one batch."""
-    command = [command_for(cfg), *cfg.get("args", [])]
+    # resolve_command(), not command_for(): a bare name that only resolves
+    # to a .cmd shim cannot be launched by CreateProcess. The fallback
+    # keeps the OSError below readable if this is ever reached without
+    # unavailable() having refused the run first.
+    command = [resolve_command(cfg) or command_for(cfg), *cfg.get("args", [])]
     try:
         result = subprocess.run(
             command,
