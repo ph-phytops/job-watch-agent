@@ -4,7 +4,13 @@ name: daily-digest
 
 on:
   schedule:
-    - cron: "30 6 * * *" # 06:30 UTC = 08:30 Paris in summer, 07:30 in winter
+    # Fires at 04:47 Paris all year: the timezone key keeps the delivery time
+    # stable across the winter clock change, which a bare UTC cron cannot do.
+    # The hour sits in the quietest window for Actions load, and the odd minute
+    # follows GitHub's own advice to avoid the start of an hour. Both are
+    # best effort: the docs promise no punctuality and may drop a run outright.
+    - cron: "47 4 * * *"
+      timezone: "Europe/Paris"
   workflow_dispatch: # manual "Run workflow" button for testing
 
 permissions:
