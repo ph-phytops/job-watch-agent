@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 TIMEOUT = 300
@@ -165,14 +166,23 @@ def _review_one(jobs: list[dict], cfg: dict, profile: str) -> dict[str, dict]:
     # unavailable() having refused the run first.
     command = [resolve_command(cfg) or command_for(cfg), *cfg.get("args", [])]
     try:
-        result = subprocess.run(
-            command,
-            input=_prompt(jobs, cfg, profile),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=TIMEOUT,
-        )
+        # Run from an empty throwaway directory. A CLI assistant discovers the
+        # CLAUDE.md of its working directory and of every parent, so launching
+        # from the repo silently prepended whatever notes live above it: one
+        # profile's briefing then coloured another profile's verdicts, and a
+        # checkout without those files reviewed differently for no visible
+        # reason. The prompt travels on stdin and needs no files, so an empty
+        # cwd costs nothing and keeps the review resting on profile_path alone.
+        with tempfile.TemporaryDirectory(prefix="jobwatch-llm-") as sandbox:
+            result = subprocess.run(
+                command,
+                input=_prompt(jobs, cfg, profile),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=TIMEOUT,
+                cwd=sandbox,
+            )
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"  [!] LLM call failed: {exc}")
         return {}
