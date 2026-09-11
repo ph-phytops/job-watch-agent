@@ -18,7 +18,9 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
+import time
 import tomllib
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -110,6 +112,55 @@ FETCHERS = {
     "lever": fetch_lever,
     "ashby": fetch_ashby,
 }
+
+
+def fetch_linkedin_description(url: str) -> str:
+    """Full text of a LinkedIn posting, or "" when it cannot be read.
+
+    An ATS hands over the description with the listing; an email alert hands
+    over a title and a link, so without this the qualitative pass would judge
+    half of a mailbox-driven profile on its titles alone. LinkedIn serves the
+    posting to logged-out visitors at the endpoint below, which we call under
+    this project's own user agent, once per finalist, on demand and never in
+    CI. Indeed answers 401 to the same request and stays title-only.
+    """
+    match = re.search(r"linkedin\.com/jobs/view/(\d+)", url)
+    if not match:
+        return ""
+    guest = (
+        "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/"
+        f"{match.group(1)}"
+    )
+    response = requests.get(guest, headers=HEADERS, timeout=TIMEOUT)
+    response.raise_for_status()
+    body = BeautifulSoup(response.text, "html.parser").select_one(
+        "div.show-more-less-html__markup, div.description__text"
+    )
+    return body.get_text("\n", strip=True) if body else ""
+
+
+def fill_missing_descriptions(jobs: list[dict]) -> int:
+    """Fetch the description of finalists that arrived without one.
+
+    In practice only email-sourced postings get here empty-handed. A failure is
+    reported and skipped: reviewing one posting on its title is worse than
+    reviewing it in full, and far better than aborting the run.
+    """
+    fetched = 0
+    for job in jobs:
+        if job.get("content"):
+            continue
+        try:
+            job["content"] = fetch_linkedin_description(job["url"])
+        except Exception as exc:  # noqa: BLE001, report and move on
+            print(f"  [!] no description for {job['title'][:40]}: {exc}")
+            continue
+        if job["content"]:
+            fetched += 1
+            # One page per second. This is a courtesy read of a handful of
+            # public pages, and it should stay visibly unlike a crawler.
+            time.sleep(1)
+    return fetched
 
 
 def _plain_text(html: str) -> str:
@@ -378,6 +429,10 @@ def main() -> int:
         top = kept[: args.top or llm_cfg.get("top_n", 10)]
         print(f"\n[llm] reading {len(top)} full description(s) "
               f"out of {len(kept)} open matches...")
+        fetched = fill_missing_descriptions(top)
+        if fetched:
+            print(f"  {fetched} of them read from LinkedIn "
+                  f"(email alerts carry no description).")
         verdicts = review(top, llm_cfg, load_profile(llm_cfg, BASE))
         today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
         path = SEEN_PATH.parent / f"review-{today}.md"

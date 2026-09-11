@@ -75,7 +75,12 @@ Four stages, all driven from `main()` in `jobwatch.py`:
 5. **Review (optional, `--llm`)**: a local-only qualitative pass. The
    deterministic scorer ranks thousands of *titles* for free; `llm_review.py`
    then reads the full *descriptions* of the top `[llm].top_n` only and pipes
-   them into the CLI named by `[llm].command`. It reviews what is **open**,
+   them into the CLI named by `[llm].command`. An ATS ships the description
+   with the listing, an email alert does not, so `fill_missing_descriptions()`
+   fetches the missing ones first (`fetch_linkedin_description`, LinkedIn's
+   logged-out endpoint; Indeed answers 401 and stays title-only). Without it a
+   mailbox-driven profile would be reviewed on its titles alone, which is
+   exactly what the pass exists to avoid. It reviews what is **open**,
    not what is new, since the scheduled cloud run has already consumed
    "new", and
    writes `data/review-<date>.md`, which is gitignored. `--top N` overrides `top_n` for a
@@ -236,8 +241,13 @@ right.
 
 ## Constraints from the README
 
-- Zero recurring cost: no paid API tier or SaaS. Public ATS endpoints and free
-  GitHub Actions minutes only, no scraping, no authenticated job-board calls.
+- Zero recurring cost: no paid API tier or SaaS, public ATS endpoints and free
+  GitHub Actions minutes only, and **no authenticated job-board call anywhere**.
+  The scheduled cloud run fetches nothing but those ATS APIs. The local `--llm`
+  pass additionally reads one public LinkedIn posting page per finalist that
+  arrived without a description, under this project's own user agent, one page
+  per second. That is the only page fetch in the codebase, it covers postings
+  the mailbox owner was already sent by email, and it never runs in CI.
 - Scoring must be explainable; a black-box relevance number is not acceptable.
 - Comments and prose in the repo are English; user-facing digest content and the
   email-parsing constants are French.
