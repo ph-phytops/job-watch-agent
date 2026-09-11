@@ -99,15 +99,27 @@ def _prompt(jobs: list[dict], cfg: dict, profile: str) -> str:
         content = (job.get("content") or "").strip()
         if len(content) > max_chars:
             content = content[:max_chars] + "\n[...truncated]"
+        # Only postings collected from email alerts carry these two.
+        extra = ""
+        if job.get("source"):
+            extra += f"seen via: {job['source']}\n"
+        if job.get("network"):
+            extra += f"referral signal: {job['network']}\n"
+        if not content:
+            content = (
+                "(unavailable: judge on the fields above alone, "
+                "and say so in the note)"
+            )
         blocks.append(
             f"--- POSTING\n"
             f"url: {job['url']}\n"
             f"company: {job['company']}\n"
             f"title: {job['title']}\n"
             f"location: {job.get('location', '')}\n"
+            f"{extra}"
             f"deterministic score: {job.get('score', '?')} "
             f"({' · '.join(job.get('why', [])) or 'n/a'})\n"
-            f"description:\n{content or '(not available from this ATS)'}\n"
+            f"description:\n{content}\n"
         )
     return (
         f"{INSTRUCTIONS}\n\n"
@@ -201,7 +213,9 @@ def render(jobs: list[dict], verdicts: dict[str, dict], date: str) -> str:
     )
     for job in ranked:
         verdict = verdicts.get(job["url"])
-        where = f" · {job['location']}" if job.get("location") else ""
+        where = "".join(
+            f" · {bit}" for bit in (job.get("location"), job.get("network")) if bit
+        )
         if not verdict:
             lines += [
                 f"## ⚪ [{job['title']}]({job['url']}) · {job['company']}{where}",

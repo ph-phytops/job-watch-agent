@@ -47,6 +47,9 @@ HEADERS = {
 # --------------------------------------------------------------------------
 # Collectors, one per ATS. Each returns a list of "normalised" jobs:
 # {"company", "title", "location", "url"}
+# The email collector adds two optional keys, "source" and "network", which
+# an ATS cannot know about. Everything downstream reads them with .get() so
+# the four-key contract above still holds.
 # --------------------------------------------------------------------------
 
 
@@ -156,6 +159,13 @@ def save_seen(seen: set[str]) -> None:
 # --------------------------------------------------------------------------
 
 
+def _context(job: dict) -> str:
+    """Trailing ' · location · referral signal' for a digest line."""
+    return "".join(
+        f" · {bit}" for bit in (job.get("location"), job.get("network")) if bit
+    )
+
+
 def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
     """jobs must arrive scored (job["score"], job["why"]) and sorted."""
     today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
@@ -184,7 +194,7 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
     if top:
         lines += ["## 🥇 Top 3", ""]
         for rank, job in enumerate(top[:3], start=1):
-            where = f" · {job['location']}" if job["location"] else ""
+            where = _context(job)
             lines += [
                 f"### {rank}. [{job['title']}]({job['url']}) "
                 f"· {job['company']}{where}",
@@ -208,8 +218,7 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
             if job["company"] != current_company:
                 current_company = job["company"]
                 lines += [f"### {current_company}", ""]
-            location = f" · {job['location']}" if job["location"] else ""
-            lines.append(f"- [{job['title']}]({job['url']}){location}")
+            lines.append(f"- [{job['title']}]({job['url']}){_context(job)}")
         lines.append("")
 
     if errors:

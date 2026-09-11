@@ -40,8 +40,11 @@ def score_job(job: dict, cfg: dict) -> tuple[int, list[str]]:
 
     extras = cfg.get("extras", {})
 
-    # Referral signal extracted from LinkedIn alerts ("N anciens collègues").
-    if "collègue" in location or "relation" in location:
+    # Referral signal extracted from LinkedIn alerts ("N anciens collègues",
+    # "N anciens élèves", "N relations"). It has its own key: "location" now
+    # carries the real location, which is what the [scoring.location] table
+    # needs in order to mean anything on email-sourced postings.
+    if job.get("network", ""):
         points = extras.get("network_bonus", 15)
         score += points
         reasons.append(f"réseau {points:+d}")

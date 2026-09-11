@@ -60,9 +60,12 @@ Four stages, all driven from `main()` in `jobwatch.py`:
    dedicated IMAP mailbox of job alerts.
 2. **Normalise**: every collector returns the same four-key shape
    `{"company", "title", "location", "url"}`. This contract is what lets the
-   rest of the pipeline stay collector-agnostic; the email collector bends it
-   deliberately (`company` = source label like `"LinkedIn (alerte email)"`,
-   `location` = referral signal like `"⭐ 2 ancien(s) collègue(s)"`).
+   rest of the pipeline stay collector-agnostic. The email collector fills all
+   four from the alert card (employer, title, real location) and adds two
+   optional keys an ATS cannot know about: `source` (the alert that carried it,
+   `"LinkedIn (alerte email)"`) and `network` (the referral signal,
+   `"⭐ 2 ancien(s) collègue(s)"`). Everything downstream reads those two with
+   `.get()`, so an ATS job stays a valid job.
 3. **Filter**: `matches()` does substring matching on the lowercased title
    against `include_keywords` / `exclude_keywords`. Title-only by design: the
    README reserves location/seniority/qualitative scoring for a later stage.
@@ -167,10 +170,28 @@ to run the agent for someone else:
 `email_collector.py` carries the messy part: alert emails wrap links in
 tracking redirects (including double-encoded Outlook SafeLinks), so
 `_canonical_url()` unquotes twice and rebuilds a canonical LinkedIn/Indeed URL
-from the job id, and that canonical form is what the memory dedupes on. Anchor
-text is cleaned by `_clean_title()` against the `_TITLE_NOISE` /
-`_JUNK_TITLES` lists, which are **French-locale LinkedIn strings**; a
-non-French mailbox needs those lists extended.
+from the job id, and that canonical form is what the memory dedupes on.
+
+A LinkedIn card writes **no separator between the title and the employer**
+("Critical Environment Program Manager Microsoft · Paris (Sur site)"), so the
+flat anchor text cannot be split reliably. `_split_card()` uses the card's own
+markup instead: the smallest element carrying the separator is the
+"Employer · Location (mode)" line, which holds whatever the generated CSS
+classes are renamed to. Three traps are already paid for here:
+
+- The separator is matched as `" · "` **with its spaces**. French inclusive
+  writing ("Ingénieur·e", "Chef·fe") uses the same character with no spaces,
+  and matching the bare character cut those titles in half.
+- One card carries **two links to the same posting**, an outer one wrapping the
+  whole card and an inner one on the title alone. Only the outer names the
+  employer, so `_richer()` prefers it explicitly rather than relying on the
+  longer title, which no longer distinguishes them.
+- Anchors that are not LinkedIn cards (Indeed, Free-Work) fall back to
+  `_clean_title()` and the `_TITLE_NOISE` / `_JUNK_TITLES` lists, which are
+  **French-locale LinkedIn strings**; a non-French mailbox needs them extended.
+
+Verify any change here against a real mailbox, not a handwritten sample: the
+format above was wrong in two ways when guessed from memory.
 
 ## Working rules
 
