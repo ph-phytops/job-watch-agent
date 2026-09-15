@@ -40,6 +40,7 @@ ROOT = Path(__file__).parent
 BASE = ROOT
 DIGEST_DIR = ROOT / "digests"
 SEEN_PATH = ROOT / "data" / "seen.json"
+REVIEWED_PATH = ROOT / "data" / "reviewed.json"
 TIMEOUT = 20
 HEADERS = {
     "User-Agent": "job-watch-agent/0.1 (personal project; "
@@ -205,6 +206,32 @@ def save_seen(seen: set[str]) -> None:
     SEEN_PATH.write_text(json.dumps(sorted(seen), indent=2), encoding="utf-8")
 
 
+# The LLM pass keeps a memory of its own, and it is deliberately not seen.json.
+# seen.json answers "has the digest ever surfaced this posting?", and the
+# scheduled cloud run consumes it; this one answers "has the model ever READ
+# this posting?", which only the local --llm pass consumes. Merging them would
+# let the cloud run mark postings as reviewed without a model ever seeing them.
+#
+# It is never committed: .gitignore keeps every profiles/*/data/ file private
+# except seen.json, and that is the right default here. A verdict names an
+# employer, and a public "skip" on a company the candidate is still
+# interviewing with would be read by that company.
+
+
+def load_reviewed() -> dict[str, dict]:
+    if REVIEWED_PATH.exists():
+        return json.loads(REVIEWED_PATH.read_text(encoding="utf-8"))
+    return {}
+
+
+def save_reviewed(reviewed: dict[str, dict]) -> None:
+    REVIEWED_PATH.parent.mkdir(exist_ok=True)
+    REVIEWED_PATH.write_text(
+        json.dumps(reviewed, indent=2, sort_keys=True, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 # --------------------------------------------------------------------------
 # Digest
 # --------------------------------------------------------------------------
@@ -307,6 +334,12 @@ def main() -> int:
         "[llm].top_n. Use it for a one-off sweep of the backlog",
     )
     parser.add_argument(
+        "--recheck",
+        action="store_true",
+        help="with --llm: also review postings the model has already read. "
+        "Use it when the profile changed, not as a routine",
+    )
+    parser.add_argument(
         "--profile",
         metavar="NAME",
         help="run for another person: read everything from profiles/NAME/ "
@@ -320,7 +353,7 @@ def main() -> int:
     # for the repository owner's, so nobody else's search criteria can reach
     # this public repository. Every run needs one: there is no default profile
     # at the repository root, and the guard below says so instead of raising.
-    global BASE, DIGEST_DIR, SEEN_PATH
+    global BASE, DIGEST_DIR, SEEN_PATH, REVIEWED_PATH
     if args.profile:
         BASE = ROOT / "profiles" / args.profile
         if not BASE.is_dir():
@@ -329,6 +362,7 @@ def main() -> int:
             return 1
         DIGEST_DIR = BASE / "digests"
         SEEN_PATH = BASE / "data" / "seen.json"
+        REVIEWED_PATH = BASE / "data" / "reviewed.json"
         print(f"[profile] {args.profile}")
 
     # A profile reads its OWN .env and never falls back to the root one. The
@@ -426,9 +460,28 @@ def main() -> int:
         for job in kept:
             job["score"], job["why"] = score_job(job, scoring_cfg)
         kept.sort(key=lambda job: job["score"], reverse=True)
-        top = kept[: args.top or llm_cfg.get("top_n", 10)]
-        print(f"\n[llm] reading {len(top)} full description(s) "
-              f"out of {len(kept)} open matches...")
+        limit = args.top or llm_cfg.get("top_n", 10)
+        reviewed = load_reviewed()
+        # Spend the reading slots on what has NOT been read yet. The ranking
+        # alone cannot do this: a target employer is worth up to +30, so its
+        # whole board outranks any unknown company every single day, and the
+        # same postings won the slots over and over (nine of them took 81 of
+        # the first 146 reads). Two genuinely better postings were never read
+        # because they scored 60 and 55 behind that wall.
+        # Nothing disappears from the ranking: the ones already judged are
+        # listed under the report with the verdict they got, and --recheck
+        # sends them back to the model when the profile has moved.
+        pending = [job for job in kept if job["url"] not in reviewed]
+        top = (kept if args.recheck else pending)[:limit]
+        chosen = {job["url"] for job in top}
+        previously = [job for job in kept[:limit]
+                      if job["url"] in reviewed and job["url"] not in chosen]
+        print(f"\n[llm] reading {len(top)} full description(s): "
+              f"{len(pending)} never reviewed, {len(kept)} open in total"
+              + (", --recheck on" if args.recheck else "") + "...")
+        if previously:
+            print(f"  {len(previously)} already-reviewed posting(s) skipped "
+                  f"(they held these slots before; --recheck to re-read).")
         fetched = fill_missing_descriptions(top)
         if fetched:
             print(f"  {fetched} of them read from LinkedIn "
@@ -437,9 +490,29 @@ def main() -> int:
         today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
         path = SEEN_PATH.parent / f"review-{today}.md"
         path.parent.mkdir(exist_ok=True)
-        path.write_text(render(top, verdicts, today), encoding="utf-8")
+        path.write_text(render(top, verdicts, today, previously, reviewed),
+                        encoding="utf-8")
         print(f"Review written to {path.relative_to(ROOT)} "
               f"(gitignored; memory and digests untouched)")
+        # Ordered by irreversibility, like save_seen() after write_digest():
+        # marking a posting as read is what stops it from being read again, so
+        # it happens only once the report exists on disk. And only postings the
+        # model actually answered for are marked: a failed batch returns no
+        # verdict (it happened on 04/09, one verdict out of ten), and recording
+        # those would bury them for good. A url the model did not copy verbatim
+        # matches no job here and is skipped for the same reason.
+        by_url = {job["url"]: job for job in top}
+        for url, verdict in verdicts.items():
+            job = by_url.get(url)
+            if job is None:
+                continue
+            reviewed[url] = {
+                "date": today,
+                "verdict": verdict.get("verdict", ""),
+                "company": job.get("company", ""),
+                "title": job.get("title", ""),
+            }
+        save_reviewed(reviewed)
     # A dry run stops here: it has read the boards and the mailbox, but must
     # not remember anything, write a digest, or send mail.
     elif args.dry_run:

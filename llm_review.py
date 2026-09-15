@@ -205,8 +205,16 @@ def _review_one(jobs: list[dict], cfg: dict, profile: str) -> dict[str, dict]:
 ORDER = {"apply": 0, "dig": 1, "skip": 2}
 
 
-def render(jobs: list[dict], verdicts: dict[str, dict], date: str) -> str:
-    """Render the reviewed jobs as Markdown, most actionable first."""
+def render(jobs: list[dict], verdicts: dict[str, dict], date: str,
+           previously: list[dict] | None = None,
+           reviewed: dict[str, dict] | None = None) -> str:
+    """Render the reviewed jobs as Markdown, most actionable first.
+
+    `previously` holds the postings that outranked these but were already read
+    on an earlier day, with `reviewed` carrying the verdict each one got. They
+    are listed at the end rather than dropped: a posting that vanishes from the
+    report looks like a posting that stopped matching, and the reader has no
+    way to tell the difference."""
     lines = [
         f"# Job review {date}",
         "",
@@ -250,4 +258,27 @@ def render(jobs: list[dict], verdicts: dict[str, dict], date: str) -> str:
             lines += ["**Real gaps:** " + " · ".join(verdict["gaps"]), ""]
         if (verdict.get("soft_gap") or "").strip():
             lines += [f"> ⚠️ **Looks disqualifying but is not:** {verdict['soft_gap']}", ""]
+    if previously:
+        past_of = reviewed or {}
+        lines += [
+            "---",
+            "",
+            f"## Already read on an earlier day ({len(previously)})",
+            "",
+            "_These scored above the ones above and held the reading slots "
+            "until now. Re-run with `--recheck` to send them back to the "
+            "model, for instance after the profile changes._",
+            "",
+        ]
+        for job in previously:
+            past = past_of.get(job["url"], {})
+            badge = {"apply": "🟢", "dig": "🟡", "skip": "⚪"}.get(
+                past.get("verdict", ""), "⚪"
+            )
+            lines.append(
+                f"- {badge} **{past.get('verdict') or 'unknown'}** on "
+                f"{past.get('date') or '?'} · score {job.get('score', '?')} · "
+                f"[{job['title']}]({job['url']}) · {job['company']}"
+            )
+        lines.append("")
     return "\n".join(lines) + "\n"
