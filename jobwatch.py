@@ -237,9 +237,9 @@ def _free_report_path(today: str) -> Path:
     harmless while both passes read the same top N and wrote the same thing;
     since the selection only returns postings the model has never read, two
     passes cover DISJOINT postings and the second destroyed the first. It
-    happened on 15/09: 17 of the 41 postings read that day, four of them worth
-    digging into, kept a one-word verdict in reviewed.json and lost the analysis
-    they were read for. These reports are gitignored, so there is no history to
+    happened on 15/09: 21 of the 41 postings read that day, two of them worth
+    applying to and five worth digging into, kept a one-word verdict in
+    reviewed.json and lost the analysis they were read for. These reports are gitignored, so there is no history to
     fall back on.
     """
     path = SEEN_PATH.parent / f"review-{today}.md"
