@@ -14,8 +14,9 @@ import datetime as dt
 import email
 import imaplib
 import re
+import unicodedata
 from email.message import Message
-from urllib.parse import unquote
+from urllib.parse import quote_plus, unquote
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
@@ -42,6 +43,27 @@ _CARD_SEPARATOR = " · "
 # employer, kept in one place because it is also the fallback the card parser
 # is allowed to overwrite.
 _INDEED_SOURCE = "Indeed (alerte email)"
+
+# An Indeed alert link that carries no posting id. A recurring alert links
+# straight to the posting; the letter confirming a newly created alert routes
+# every card through a per-recipient redirector instead. That token names the
+# mailbox owner, so it can be neither followed nor written to the memory the
+# repository tracks, and the posting has to be recognised by its card instead.
+_INDEED_REDIRECTOR = "engage.indeed.com"
+
+# The identity rebuilt for such a card, which doubles as a usable link: a
+# plain Indeed search for the posting. It holds nothing but the title and the
+# employer, so it is the same from one run to the next and carries no token.
+_INDEED_SEARCH = "https://fr.indeed.com/jobs?q="
+
+# That template writes "Employer [rating] - Location" on the card's second
+# line. Unlike a title, which often contains the same dash, this line is
+# unambiguous: over every such card in a live mailbox the separator appeared
+# there exactly once, so partitioning on it cannot cut a field in half.
+_INDEED_CARD_SEPARATOR = " - "
+
+# The employer rating, printed between the employer and that separator.
+_TRAILING_RATING = re.compile(r"\s+\d+([.,]\d+)?$")
 
 # An employer cell holding nothing but a number is Indeed's star rating, which
 # sits next to the employer on the same row of some templates.
@@ -120,7 +142,7 @@ def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
             existing = jobs.get(job["url"])
             if existing is None or _richer(job, existing):
                 jobs[job["url"]] = job
-    return list(jobs.values())
+    return _fold_twins(list(jobs.values()))
 
 
 def _message_order(msg_id: str) -> tuple[int, int, str]:
@@ -177,6 +199,9 @@ def _extract_jobs(html: str) -> list[dict]:
             continue
         canonical, source = _canonical_url(href)
         if not canonical:
+            posting = _untracked_indeed_posting(anchor, href)
+            if posting:
+                found.append(posting)
             continue
         raw = " ".join(anchor.get_text(" ", strip=True).split())
         if len(raw) < 5 or raw.lower() in _JUNK_TITLES:
@@ -211,6 +236,125 @@ def _extract_jobs(html: str) -> list[dict]:
             }
         )
     return found
+
+
+def _untracked_indeed_posting(anchor, href: str) -> dict | None:
+    """A posting whose link names the recipient, keyed by its card instead.
+
+    Returns None for every other unrecognised link, which is what the vast
+    majority of them are: an email is mostly navigation.
+    """
+    if _INDEED_REDIRECTOR not in href:
+        return None
+    card = _split_indeed_confirmation_card(anchor)
+    if card is None:
+        return None
+    title, company, location = card
+    return {
+        "company": company,
+        "title": title,
+        "location": location,
+        "url": _search_url(title, company),
+        "source": _INDEED_SOURCE,
+        "network": "",
+    }
+
+
+def _split_indeed_confirmation_card(anchor) -> tuple[str, str, str] | None:
+    """Read (title, employer, location) off a card that carries no posting id.
+
+    The card nests two links to the same posting, an outer one wrapping the
+    whole card and an inner one on the title alone, and only the inner one
+    holds the title by itself. The outer one is turned away here rather than
+    later, because both would otherwise be read as two different postings.
+
+    The card's second line does the sorting: it names the employer and the
+    location, the outer link repeats it inside its own text and the inner link
+    cannot. Gating on a generated CSS class would be shorter and would break
+    the month the template renames it.
+
+    Returns None for anything that is not such a card, navigation included.
+    """
+    table = anchor.find_parent("table")
+    if table is None:
+        return None
+    cells = [_flat(cell.get_text(" ", strip=True)) for cell in table.find_all("td")]
+    cells = [cell for cell in cells if cell]
+    if len(cells) < 2:
+        return None
+    title, line = cells[0], cells[1]
+    if _INDEED_CARD_SEPARATOR not in line:
+        return None
+    raw = _flat(anchor.get_text(" ", strip=True))
+    if line in raw or title != raw:
+        return None
+    company, _, location = line.partition(_INDEED_CARD_SEPARATOR)
+    company = _TRAILING_RATING.sub("", company).strip()
+    location = location.strip()
+    if not company or not location:
+        return None
+    return title, company, location
+
+
+def _slug(text: str) -> str:
+    """Fold text to lowercase ASCII words, so one posting yields one identity.
+
+    The result keys a posting that has no id of its own, and the same posting
+    does not always reach the mailbox with the same casing or accents.
+    """
+    flat = unicodedata.normalize("NFKD", text)
+    flat = "".join(char for char in flat if not unicodedata.combining(char))
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", flat.lower()).split())
+
+
+def _search_url(title: str, company: str) -> str:
+    """A stable Indeed search standing in for a posting with no id."""
+    return _INDEED_SEARCH + quote_plus(_slug(f"{title} {company}"))
+
+
+def _fold_twins(jobs: list[dict]) -> list[dict]:
+    """Merge a card-keyed posting into the same posting seen with a real link.
+
+    One posting can reach the mailbox twice, through an alert that links
+    straight to it and through a confirmation letter that cannot. Keeping both
+    would list it twice and spend two reading slots on it. The copy worth
+    keeping is the one that opens the posting rather than a search for it, so
+    the card hands over what it knows and steps aside.
+
+    Matching on title and employer is the strict case. A posting whose own
+    card was left unsplit carries no employer at all, so on that side the
+    title has to match alone, or the pair is never recognised and the posting
+    is listed twice, once under a real employer and once under the fallback
+    label. Both sides are Indeed postings from one mailbox and one window,
+    which is what keeps a title-only match narrow enough to be safe.
+    """
+    def key(job: dict) -> str:
+        return _slug(f"{job.get('title', '')} {job.get('company', '')}")
+
+    identified: dict[str, dict] = {}
+    for job in jobs:
+        if job.get("url", "").startswith(_INDEED_SEARCH):
+            continue
+        for candidate in (key(job), _slug(job.get("title", ""))
+                          if job.get("company") == _INDEED_SOURCE else ""):
+            if candidate:
+                identified.setdefault(candidate, job)
+
+    kept = []
+    for job in jobs:
+        if not job.get("url", "").startswith(_INDEED_SEARCH):
+            kept.append(job)
+            continue
+        twin = identified.get(key(job)) or identified.get(_slug(job.get("title", "")))
+        if twin is None:
+            kept.append(job)
+            continue
+        # The twin owns the better link; the card owns the better fields.
+        if twin.get("company") == _INDEED_SOURCE and job.get("company"):
+            twin["company"] = job["company"]
+        if not twin.get("location"):
+            twin["location"] = job.get("location", "")
+    return kept
 
 
 def _split_card(anchor, raw: str) -> tuple[str, str, str] | None:
