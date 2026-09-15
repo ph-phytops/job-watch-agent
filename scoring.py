@@ -29,12 +29,9 @@ def score_job(job: dict, cfg: dict) -> tuple[int, list[str]]:
             score += points
             reasons.append(f"{keyword} {points:+d}")
 
-    # Company and location: single best match each (avoids double-counting
-    # "Amazon" + "AWS", or "Paris" + "France").
+    # Company and location: one bonus each, but every penalty that applies.
     for label, table in (("company", company_text), ("location", location)):
-        best = _best_match(table, cfg.get(label, {}))
-        if best:
-            keyword, points = best
+        for keyword, points in _table_score(table, cfg.get(label, {})):
             score += points
             reasons.append(f"{keyword} {points:+d}")
 
@@ -61,9 +58,28 @@ def score_job(job: dict, cfg: dict) -> tuple[int, list[str]]:
     return score, reasons
 
 
-def _best_match(text: str, table: dict) -> tuple[str, int] | None:
+def _table_score(text: str, table: dict) -> list[tuple[str, int]]:
+    """The single best bonus, plus EVERY penalty that matches.
+
+    Keeping only the best match stops "Amazon" and "AWS", or "Paris" and
+    "France", from paying twice. That is right for bonuses and wrong for
+    penalties: a penalty that only counts when nothing better matches is a
+    penalty that never counts. "US - Remote" contains "remote", so no negative
+    weight could ever outrank it and those postings could not be filtered at
+    all; and a profile wanting to rule out distance work had to give up on a
+    severity scale and set every penalty to one value, since only the largest
+    would ever be read.
+
+    Bonuses still compete for a single slot, so no weight needs rewriting: a
+    posting simply stops being rescued by the one positive word it contains.
+    """
     best: tuple[str, int] | None = None
+    penalties: list[tuple[str, int]] = []
     for keyword, points in table.items():
-        if keyword.lower() in text and (best is None or points > best[1]):
+        if keyword.lower() not in text:
+            continue
+        if points < 0:
+            penalties.append((keyword, points))
+        elif best is None or points > best[1]:
             best = (keyword, points)
-    return best
+    return ([best] if best else []) + penalties

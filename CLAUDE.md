@@ -118,6 +118,22 @@ Dates come from `Europe/Paris` explicitly, not the host timezone: the GitHub
 Actions runner is UTC, and a run after 22:00 Paris would otherwise date the
 digest with the previous day.
 
+### Scoring
+
+`[scoring.title]` accumulates: a "Technical Program Manager, Datacenter"
+deserves both boosts. `[scoring.company]` and `[scoring.location]` award **one
+bonus each, plus every penalty that matches**. Competing for a single bonus
+slot stops "Amazon" and "AWS", or "Paris" and "France", from paying twice;
+letting penalties accumulate is what makes them work at all. While a penalty
+only counted when nothing better matched, "US - Remote" kept the `+30` of
+"remote" and no negative weight could reach it, and a profile that wanted to
+rule out distance work had to flatten every penalty to a single value because
+only the largest was ever read.
+
+**Before writing a negative weight, ask what else matches the same string.**
+That is the recurring trap: a `"hybride"` or `"france"` bonus sitting in the
+same table silently cancelled a city penalty.
+
 ### Memory
 
 `data/seen.json` is a flat set of job URLs already surfaced. Only unseen URLs
