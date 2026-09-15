@@ -191,11 +191,60 @@ slug = "cohere"
 "hybride" = 10
 "london" = 5
 "amsterdam" = 5
-"new york" = -15
-"san francisco" = -15
-"sunnyvale" = -15
-"seattle" = -15
-"bellevue" = -15
+
+# Out of reach, so out of the reading slots. These only started working with
+# the scoring change: while a table kept its single best match, "US - Remote"
+# scored the +30 of "remote" and no negative could ever outrank it. Penalties
+# now add up, so a location says no once per city it lists.
+#
+# -50 rather than -15, measured: at -15 four US postings still held slots in
+# the top 20, at -50 nineteen of the twenty are European. Nothing European
+# loses a point, and no posting gains one.
+#
+# NO TWO-LETTER STATE CODES beyond the two below, and that is not an oversight.
+# ", ca" catches Cannes and Caen, ", ma" catches Madrid and Marseille, ", wa"
+# catches Warsaw, ", co" catches Copenhagen. None of them showed up in today's
+# corpus, which proves nothing about next week: a penalty is written against
+# what a string CAN contain, not against what it happened to contain. City
+# names carry the same coverage without the trap. "austin" was dropped for
+# exactly this reason, it catches Austin Friars in London.
+"united states" = -50
+"us - " = -50            # the space matters: "US - Remote", nothing else
+", tx" = -50             # no European city abbreviates this way
+", nj" = -50
+"new york" = -50
+"san francisco" = -50
+"seattle" = -50
+"sunnyvale" = -50
+"bellevue" = -50
+"boston" = -50
+"houston" = -50
+"denver" = -50
+"chicago" = -50
+"atlanta" = -50
+"los angeles" = -50
+"san jose" = -50
+"santa clara" = -50
+"mountain view" = -50
+"palo alto" = -50
+"menlo park" = -50
+"redmond" = -50
+"columbus" = -50
+"richmond" = -50
+"livingston" = -50
+"greensboro" = -50
+# Same reasoning, other continents: a posting there cannot be taken from Paris.
+"india" = -50
+"hyderabad" = -50
+"bangalore" = -50
+"singapore" = -50
+"apac" = -50
+"israel" = -50
+"tel aviv" = -50
+"tokyo" = -50
+"sydney" = -50
+"toronto" = -50
+"canada" = -50
 
 [scoring.extras]
 network_bonus = 15   # "N anciens collègues / relations" in the alert
