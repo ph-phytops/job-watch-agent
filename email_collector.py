@@ -38,6 +38,15 @@ _TITLE_NOISE = [
 # and splitting on the bare dot cut those titles in half.
 _CARD_SEPARATOR = " · "
 
+# The label an Indeed posting is grouped under when its card names no
+# employer, kept in one place because it is also the fallback the card parser
+# is allowed to overwrite.
+_INDEED_SOURCE = "Indeed (alerte email)"
+
+# An employer cell holding nothing but a number is Indeed's star rating, which
+# sits next to the employer on the same row of some templates.
+_RATING_ONLY = re.compile(r"^\d+([.,]\d+)?$")
+
 # Referral signals printed on a LinkedIn card, strongest lead first.
 _NETWORK_SIGNALS = [
     (r"(\d+)\s+anciens?\s+collègues?", "⭐ {} ancien(s) collègue(s)"),
@@ -87,7 +96,12 @@ def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
             raw_ids = data[0]
             if raw_ids:
                 message_ids.update(raw_ids.decode().split())
-        for msg_id in message_ids:
+        # Oldest message first, and never the order a set happens to iterate
+        # in: that order is randomised at every process start, and two anchors
+        # describing the same posting are merged below by keeping the richer
+        # of them, so an unsorted read makes the digest differ from one run to
+        # the next on the same mailbox.
+        for msg_id in sorted(message_ids, key=_message_order):
             _, msg_data = imap.fetch(msg_id, "(RFC822)")
             part = msg_data[0] if msg_data else None
             if not isinstance(part, tuple):
@@ -109,6 +123,17 @@ def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
     return list(jobs.values())
 
 
+def _message_order(msg_id: str) -> tuple[int, int, str]:
+    """Sort key for an IMAP message id, which must never raise.
+
+    RFC 3501 numbers messages, so int() would do. It is not worth an
+    exception if a server ever answers otherwise: jobwatch catches the error
+    around the whole mailbox and would lose every email posting of the day
+    behind one line of log. Anything unnumbered sorts last, in its own order.
+    """
+    return (0, int(msg_id), "") if msg_id.isdigit() else (1, 0, msg_id)
+
+
 def _richer(candidate: dict, current: dict) -> bool:
     """True when the candidate anchor carries more of the posting.
 
@@ -116,10 +141,14 @@ def _richer(candidate: dict, current: dict) -> bool:
     outer anchor happened to produce a longer title (the employer was glued to
     it). Now that both anchors yield the same clean title, the tie-break has to
     say out loud what it is really after: the anchor that named the employer.
+
+    Read with .get(): a producer that forgets a key must degrade here, not
+    raise, because jobwatch catches the exception around the whole mailbox and
+    would lose every email posting of the day behind one line of log.
     """
-    if bool(candidate["location"]) != bool(current["location"]):
-        return bool(candidate["location"])
-    return len(candidate["title"]) > len(current["title"])
+    if bool(candidate.get("location")) != bool(current.get("location")):
+        return bool(candidate.get("location"))
+    return len(candidate.get("title", "")) > len(current.get("title", ""))
 
 
 def _html_body(message: Message) -> str:
@@ -163,6 +192,10 @@ def _extract_jobs(html: str) -> list[dict]:
             # else; a short one there is navigation noise, not a posting.
             title, company, location = _clean_title(raw), "", ""
             minimum = 5
+            if source.startswith("Indeed"):
+                sides = _split_indeed_alert_card(anchor)
+                if sides:
+                    company, location = sides
         if len(title) < minimum:
             continue
         found.append(
@@ -206,6 +239,49 @@ def _split_card(anchor, raw: str) -> tuple[str, str, str] | None:
     return title, company.strip(), location.strip()
 
 
+def _split_indeed_alert_card(anchor) -> tuple[str, str] | None:
+    """Read (employer, location) off a recurring Indeed alert card.
+
+    Indeed writes no separator at all between the three fields: read flat, a
+    card is "Chef de projet IT (H/F) TRAPIL La Defense (92)" and there is
+    nothing to cut on, while half the titles contain " - " themselves. So the
+    split comes from the markup, as it does for LinkedIn, but for the opposite
+    reason: there the separator exists and is ambiguous, here there is none.
+
+    The title stays untouched, since the anchor already holds it alone. Only
+    the employer and the location are missing, and the card keeps them in a
+    sibling cell OUTSIDE the anchor, which is why the LinkedIn splitter can
+    never find them however hard it looks inside.
+
+    Exactly two paragraphs is a gate, not an observation. The day Indeed
+    prints a third one (an employer rating would land right there, it already
+    does in the other template) the card is handed back unsplit rather than
+    read one field out of step. Nothing is lost when that happens: the anchor
+    carries the posting id, so the posting is collected exactly as it is
+    today, just without its employer and its location.
+    """
+    heading = anchor.find_parent("h2")
+    if heading is None:
+        return None
+    card = heading.find_parent("table")
+    if card is None:
+        return None
+    lines = [_flat(node.get_text(" ", strip=True)) for node in card.find_all("p")]
+    lines = [line for line in lines if line]
+    if len(lines) != 2 or _RATING_ONLY.match(lines[0]):
+        return None
+    return lines[0], lines[1]
+
+
+def _flat(text: str) -> str:
+    """Collapse every run of whitespace, the no-break space included.
+
+    Indeed writes a no-break space after the employer, before its rating.
+    Left alone it turns one employer into two.
+    """
+    return " ".join(text.split())
+
+
 def _network_signal(raw: str) -> str:
     """The referral lead printed on the card, or "" when there is none.
 
@@ -242,7 +318,7 @@ def _canonical_url(href: str) -> tuple[str | None, str]:
         match = re.search(r"[?&]jk=([0-9a-fA-F]+)", href)
         if match:
             url = f"https://fr.indeed.com/viewjob?jk={match.group(1)}"
-            return url, "Indeed (alerte email)"
+            return url, _INDEED_SOURCE
     match = re.search(r"(https?://(?:www\.)?free-work\.com/[^\s\"'>]*job[^\s\"'>]*)", href)
     if match:
         return match.group(1).split("?")[0], "Free-Work (alerte email)"

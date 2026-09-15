@@ -47,6 +47,12 @@ APPLICATIONS_PATH = ROOT / "data" / "applications.json"
 # files, "rejected" and "closed" are dead ones worth keeping so they never
 # climb back into the ranking.
 STATUSES = ("applied", "interviewing", "rejected", "closed")
+# Not a state a file can be in, a way out of one: --status forget removes the
+# entry. Recording an application is otherwise irreversible from the command
+# line, and the urls easiest to confuse are those differing by one digit on the
+# same board, where recording the wrong one silently pulls a live conversation
+# out of the ranking.
+UNDO_STATUS = "forget"
 TIMEOUT = 20
 HEADERS = {
     "User-Agent": "job-watch-agent/0.1 (personal project; "
@@ -224,6 +230,26 @@ def save_seen(seen: set[str]) -> None:
 # interviewing with would be read by that company.
 
 
+def _free_report_path(today: str) -> Path:
+    """Where today's review goes, without ever overwriting an earlier one.
+
+    A second pass on the same day used to land on the same filename. That was
+    harmless while both passes read the same top N and wrote the same thing;
+    since the selection only returns postings the model has never read, two
+    passes cover DISJOINT postings and the second destroyed the first. It
+    happened on 15/09: 17 of the 41 postings read that day, four of them worth
+    digging into, kept a one-word verdict in reviewed.json and lost the analysis
+    they were read for. These reports are gitignored, so there is no history to
+    fall back on.
+    """
+    path = SEEN_PATH.parent / f"review-{today}.md"
+    run = 2
+    while path.exists():
+        path = SEEN_PATH.parent / f"review-{today}-{run}.md"
+        run += 1
+    return path
+
+
 def load_reviewed() -> dict[str, dict]:
     if REVIEWED_PATH.exists():
         return json.loads(REVIEWED_PATH.read_text(encoding="utf-8"))
@@ -263,19 +289,43 @@ def save_applications(applications: dict[str, dict]) -> None:
     )
 
 
-def record_application(url: str, status: str, note: str, date: str = "") -> int:
+def record_application(url: str, status: str, note: str, date: str = "",
+                       force: bool = False) -> int:
     """Write one application down and stop. Touches no board and no mailbox:
     recording a rejection must not depend on the network being up.
 
     `date` exists for backfilling: stamping an application sent three weeks ago
     with today's date would put a false fact in a memory file, and memory files
-    get trusted later precisely because nobody re-checks them."""
+    get trusted later precisely because nobody re-checks them.
+
+    Every check happens BEFORE the write. The order used to be reversed, so the
+    warning about an unknown url announced an entry that was already on disk,
+    with no command to take it back, while a recorded posting leaves the reading
+    slots for good (--recheck deliberately does not bring it back)."""
+    if status == UNDO_STATUS:
+        applications = load_applications()
+        if applications.pop(url, None) is None:
+            print(f"[applications] nothing recorded for {url}")
+            return 1
+        save_applications(applications)
+        print(f"[applications] forgotten: {url}")
+        return 0
     if date:
         try:
-            dt.date.fromisoformat(date)
+            date = dt.date.fromisoformat(date).isoformat()
         except ValueError:
             print(f"[applications] --date must be YYYY-MM-DD, got {date!r}")
             return 1
+    # A url no run has ever collected is usually a typo, or one copied from the
+    # browser bar rather than from a digest. It would filter nothing, so it is
+    # refused rather than recorded. Both memories count: the message below
+    # names a review report, and a report url reaches reviewed.json first.
+    if not force and url not in load_seen() | set(load_reviewed()):
+        print("[applications] this url has never been collected by a run, so "
+              "it would filter nothing. Nothing was written.")
+        print("  Copy it from a digest or a review report, or pass --force to "
+              "record it anyway.")
+        return 1
     applications = load_applications()
     previous = applications.get(url, {})
     applications[url] = {
@@ -286,12 +336,7 @@ def record_application(url: str, status: str, note: str, date: str = "") -> int:
     save_applications(applications)
     was = f" (was {previous['status']})" if previous.get("status") else ""
     print(f"[applications] {status}{was}: {url}")
-    # A url that no run has ever collected is usually a typo or a url copied
-    # from the browser bar rather than from the digest, and it would silently
-    # never match anything. Say so instead of failing quietly.
-    if url not in load_seen():
-        print("  [!] this url has never been collected by a run. Copy it from "
-              "a digest or a review report, or it will filter nothing.")
+    print(f"  Undo with --applied {url} --status {UNDO_STATUS}")
     return 0
 
 
@@ -430,9 +475,16 @@ def main() -> int:
     )
     parser.add_argument(
         "--status",
-        choices=STATUSES,
+        choices=(*STATUSES, UNDO_STATUS),
         default="applied",
-        help="with --applied: where the file stands (default: applied)",
+        help="with --applied: where the file stands (default: applied). "
+        "Use 'forget' to remove an entry recorded on the wrong url",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="with --applied: record a url no run has collected, instead of "
+        "refusing it as a probable typo",
     )
     parser.add_argument(
         "--note",
@@ -460,6 +512,25 @@ def main() -> int:
         "there. Omit it to run the default profile at the repository root",
     )
     args = parser.parse_args()
+
+    # --dry-run promises that nothing is written, and that promise is printed
+    # in the README. Two combinations broke it in silence: --llm is tested
+    # before the dry-run branch is ever reached, so it wrote its report and
+    # data/reviewed.json right after announcing that memory was untouched, and
+    # --applied writes before the collection even starts. Refusing beats
+    # half-writing, since both commands exist in order to leave a trace.
+    if args.dry_run and (args.llm or args.applied):
+        writes = ("--llm", "a report and data/reviewed.json") if args.llm \
+            else ("--applied", "data/applications.json")
+        print(f"[dry run] {writes[0]} exists to write {writes[1]}, so it "
+              f"cannot be combined with --dry-run. Run {writes[0]} on its own.")
+        return 1
+    # "limit" ends up in a slice, where a negative value quietly keeps almost
+    # the whole backlog (pending[:-1]) instead of failing, and 0 is swallowed
+    # by the `or` that reads top_n.
+    if args.top is not None and args.top < 1:
+        print(f"[llm] --top must be 1 or more, got {args.top}.")
+        return 1
 
     # A profile is one person's whole setup (config, secrets, memory, digests,
     # candidate profile) under profiles/<name>/. profiles/ is gitignored except
@@ -499,7 +570,7 @@ def main() -> int:
     # file, and before the collection so recording a rejection works offline.
     if args.applied:
         return record_application(args.applied, args.status, args.note,
-                                  args.date)
+                                  args.date, args.force)
     if args.applications:
         return show_applications()
 
@@ -621,14 +692,14 @@ def main() -> int:
                   f"(email alerts carry no description).")
         verdicts = review(top, llm_cfg, load_profile(llm_cfg, BASE))
         today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
-        path = SEEN_PATH.parent / f"review-{today}.md"
+        path = _free_report_path(today)
         path.parent.mkdir(exist_ok=True)
         path.write_text(
             render(top, verdicts, today, previously, reviewed,
                    applied, applications),
             encoding="utf-8")
         print(f"Review written to {path.relative_to(ROOT)} "
-              f"(gitignored; memory and digests untouched)")
+              f"(gitignored; seen.json and digests untouched)")
         # Ordered by irreversibility, like save_seen() after write_digest():
         # marking a posting as read is what stops it from being read again, so
         # it happens only once the report exists on disk. And only postings the
