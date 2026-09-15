@@ -64,6 +64,14 @@ name = "OpenAI"
 ats = "ashby"
 slug = "openai"
 
+# OpenAI's deployment arm, a separate company with its own Ashby board. Its
+# "Forward Deployed Engineer" reqs are software engineering roles, but the
+# board also carries Delivery titles (Technical Deployment Lead) that are not.
+[[companies]]
+name = "DeployCo"
+ats = "ashby"
+slug = "openai-deployment-company"
+
 [[companies]]
 name = "CoreWeave"
 ats = "greenhouse"
@@ -98,6 +106,11 @@ slug = "hcompany"
 name = "Scaleway"
 ats = "lever"
 slug = "scaleway"
+
+[[companies]]
+name = "Pigment"
+ats = "lever"
+slug = "pigment"
 
 [[companies]]
 name = "Databricks"
@@ -199,7 +212,8 @@ rate_bonus = 10
 [llm]
 command = "claude"                 # CLI the prompt is piped into (must be on PATH)
 args = ["-p"]                      # non-interactive mode
-top_n = 10                         # finalists whose description gets read
+top_n = 20                         # finalists whose description gets read
+                                   # (never-reviewed ones: see --recheck)
 max_chars = 6000                   # per-posting budget sent to the model
 profile_path = "data/profile.md"   # gitignored: your profile never gets published
 batch_size = 10                    # offres par appel au modele (un lot qui echoue n'annule pas les autres)
