@@ -205,9 +205,16 @@ def _review_one(jobs: list[dict], cfg: dict, profile: str) -> dict[str, dict]:
 ORDER = {"apply": 0, "dig": 1, "skip": 2}
 
 
+STATUS_ORDER = {"interviewing": 0, "applied": 1, "rejected": 2, "closed": 3}
+STATUS_BADGE = {"interviewing": "🔥", "applied": "📨",
+                "rejected": "⛔", "closed": "🔒"}
+
+
 def render(jobs: list[dict], verdicts: dict[str, dict], date: str,
            previously: list[dict] | None = None,
-           reviewed: dict[str, dict] | None = None) -> str:
+           reviewed: dict[str, dict] | None = None,
+           applied: list[dict] | None = None,
+           applications: dict[str, dict] | None = None) -> str:
     """Render the reviewed jobs as Markdown, most actionable first.
 
     `previously` holds the postings that outranked these but were already read
@@ -222,6 +229,32 @@ def render(jobs: list[dict], verdicts: dict[str, dict], date: str,
         f"{len(jobs)} finalists ranked by the deterministic scorer.",
         "",
     ]
+    # Your own files first. They are the most actionable lines in the report
+    # and the model never sees them: it would keep recommending the ones that
+    # are already closed.
+    if applied:
+        status_of = applications or {}
+        lines += [f"## Your files ({len(applied)})", "",
+                  "_Still matching, still open, but out of the running: you "
+                  "have applied. Never sent to the model._", ""]
+        for job in sorted(
+            applied,
+            key=lambda j: (
+                STATUS_ORDER.get(
+                    (status_of.get(j["url"], {}) or {}).get("status", ""), 9
+                ),
+                -j.get("score", 0),
+            ),
+        ):
+            entry = status_of.get(job["url"], {})
+            status = entry.get("status") or "unknown"
+            note = f" · {entry['note']}" if entry.get("note") else ""
+            lines.append(
+                f"- {STATUS_BADGE.get(status, '·')} **{status}** since "
+                f"{entry.get('date') or '?'} · [{job['title']}]({job['url']}) "
+                f"· {job['company']}{note}"
+            )
+        lines += ["", "---", ""]
     ranked = sorted(
         jobs,
         key=lambda j: (

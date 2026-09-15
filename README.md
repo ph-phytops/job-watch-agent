@@ -83,6 +83,10 @@ uv run jobwatch.py --profile me --dry-run   # preview only: writes nothing, send
 uv run jobwatch.py --profile me             # writes profiles/me/digests/YYYY-MM-DD.md
 uv run jobwatch.py --profile me --llm       # local: read the finalists' full descriptions
 uv run jobwatch.py --profile me --llm --top 40   # one-off sweep of the backlog
+
+# The pass only reads what it has never read, and skips what you applied to.
+uv run jobwatch.py --profile me --applied <url> --status rejected --note "..."
+uv run jobwatch.py --profile me --applications   # your files, grouped by status
 ```
 
 `uv run` provisions Python 3.13 and syncs the environment on its own, so there

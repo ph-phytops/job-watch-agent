@@ -41,6 +41,12 @@ BASE = ROOT
 DIGEST_DIR = ROOT / "digests"
 SEEN_PATH = ROOT / "data" / "seen.json"
 REVIEWED_PATH = ROOT / "data" / "reviewed.json"
+APPLICATIONS_PATH = ROOT / "data" / "applications.json"
+# What --applied accepts. They all hide a posting from the reading slots; they
+# differ only in what the report shows. "applied" and "interviewing" are live
+# files, "rejected" and "closed" are dead ones worth keeping so they never
+# climb back into the ranking.
+STATUSES = ("applied", "interviewing", "rejected", "closed")
 TIMEOUT = 20
 HEADERS = {
     "User-Agent": "job-watch-agent/0.1 (personal project; "
@@ -232,6 +238,81 @@ def save_reviewed(reviewed: dict[str, dict]) -> None:
     )
 
 
+# What you already did about a posting, which the model cannot know and keeps
+# rediscovering. Left to itself it will rate a posting "apply" that you sent a
+# letter for weeks ago, or that the employer has already turned down: it judges
+# an advert, and this records the history that makes the advert moot.
+#
+# Deliberately separate from reviewed.json: "the model read this" is the
+# agent's own bookkeeping, "I applied and was turned down" is a fact about you.
+# Also gitignored, and for a stronger reason than the verdicts: this names
+# employers and says where each conversation stands.
+
+
+def load_applications() -> dict[str, dict]:
+    if APPLICATIONS_PATH.exists():
+        return json.loads(APPLICATIONS_PATH.read_text(encoding="utf-8"))
+    return {}
+
+
+def save_applications(applications: dict[str, dict]) -> None:
+    APPLICATIONS_PATH.parent.mkdir(exist_ok=True)
+    APPLICATIONS_PATH.write_text(
+        json.dumps(applications, indent=2, sort_keys=True, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def record_application(url: str, status: str, note: str, date: str = "") -> int:
+    """Write one application down and stop. Touches no board and no mailbox:
+    recording a rejection must not depend on the network being up.
+
+    `date` exists for backfilling: stamping an application sent three weeks ago
+    with today's date would put a false fact in a memory file, and memory files
+    get trusted later precisely because nobody re-checks them."""
+    if date:
+        try:
+            dt.date.fromisoformat(date)
+        except ValueError:
+            print(f"[applications] --date must be YYYY-MM-DD, got {date!r}")
+            return 1
+    applications = load_applications()
+    previous = applications.get(url, {})
+    applications[url] = {
+        "status": status,
+        "date": date or dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat(),
+        "note": note or previous.get("note", ""),
+    }
+    save_applications(applications)
+    was = f" (was {previous['status']})" if previous.get("status") else ""
+    print(f"[applications] {status}{was}: {url}")
+    # A url that no run has ever collected is usually a typo or a url copied
+    # from the browser bar rather than from the digest, and it would silently
+    # never match anything. Say so instead of failing quietly.
+    if url not in load_seen():
+        print("  [!] this url has never been collected by a run. Copy it from "
+              "a digest or a review report, or it will filter nothing.")
+    return 0
+
+
+def show_applications() -> int:
+    applications = load_applications()
+    if not applications:
+        print("[applications] none recorded yet "
+              "(use --applied <url> --status <status>)")
+        return 0
+    by_status: dict[str, list[tuple[str, dict]]] = {}
+    for url, entry in applications.items():
+        by_status.setdefault(entry.get("status", "?"), []).append((url, entry))
+    print(f"[applications] {len(applications)} recorded")
+    for status in STATUSES:
+        rows = by_status.get(status, [])
+        for url, entry in sorted(rows, key=lambda row: row[1].get("date", "")):
+            note = f"  {entry['note']}" if entry.get("note") else ""
+            print(f"  {status:<13} {entry.get('date', '?')}  {url}{note}")
+    return 0
+
+
 # --------------------------------------------------------------------------
 # Digest
 # --------------------------------------------------------------------------
@@ -337,7 +418,39 @@ def main() -> int:
         "--recheck",
         action="store_true",
         help="with --llm: also review postings the model has already read. "
-        "Use it when the profile changed, not as a routine",
+        "Use it when the profile changed, not as a routine. It does NOT bring "
+        "back postings you applied to: an application is a fact, not a verdict",
+    )
+    parser.add_argument(
+        "--applied",
+        metavar="URL",
+        help="record that you applied to this posting and stop. Copy the url "
+        "from a digest or a review report. Postings recorded here are never "
+        "sent to the model again, and are listed at the top of the report",
+    )
+    parser.add_argument(
+        "--status",
+        choices=STATUSES,
+        default="applied",
+        help="with --applied: where the file stands (default: applied)",
+    )
+    parser.add_argument(
+        "--note",
+        default="",
+        metavar="TEXT",
+        help="with --applied: a short reminder, e.g. the recruiter's name",
+    )
+    parser.add_argument(
+        "--date",
+        default="",
+        metavar="YYYY-MM-DD",
+        help="with --applied: when it happened, for backfilling old files "
+        "(default: today)",
+    )
+    parser.add_argument(
+        "--applications",
+        action="store_true",
+        help="list what you have applied to, grouped by status, and stop",
     )
     parser.add_argument(
         "--profile",
@@ -353,7 +466,7 @@ def main() -> int:
     # for the repository owner's, so nobody else's search criteria can reach
     # this public repository. Every run needs one: there is no default profile
     # at the repository root, and the guard below says so instead of raising.
-    global BASE, DIGEST_DIR, SEEN_PATH, REVIEWED_PATH
+    global BASE, DIGEST_DIR, SEEN_PATH, REVIEWED_PATH, APPLICATIONS_PATH
     if args.profile:
         BASE = ROOT / "profiles" / args.profile
         if not BASE.is_dir():
@@ -363,6 +476,7 @@ def main() -> int:
         DIGEST_DIR = BASE / "digests"
         SEEN_PATH = BASE / "data" / "seen.json"
         REVIEWED_PATH = BASE / "data" / "reviewed.json"
+        APPLICATIONS_PATH = BASE / "data" / "applications.json"
         print(f"[profile] {args.profile}")
 
     # A profile reads its OWN .env and never falls back to the root one. The
@@ -379,6 +493,15 @@ def main() -> int:
               f"profiles/<name>/ and pass --profile <name>.")
         return 1
     config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+
+    # Bookkeeping commands stop here, before any board or mailbox is touched.
+    # They sit after the profile guard above so they write to the right person's
+    # file, and before the collection so recording a rejection works offline.
+    if args.applied:
+        return record_application(args.applied, args.status, args.note,
+                                  args.date)
+    if args.applications:
+        return show_applications()
 
     # Fail before the collection, not after: --llm downloads full descriptions,
     # so an unusable configuration must stop the run immediately.
@@ -471,17 +594,27 @@ def main() -> int:
         # Nothing disappears from the ranking: the ones already judged are
         # listed under the report with the verdict they got, and --recheck
         # sends them back to the model when the profile has moved.
-        pending = [job for job in kept if job["url"] not in reviewed]
-        top = (kept if args.recheck else pending)[:limit]
+        # A posting you already applied to leaves the running entirely, and
+        # --recheck does not bring it back: an application is a fact, not a
+        # verdict to revise. Without this the model keeps recommending closed
+        # files, having no way to know they are closed.
+        applications = load_applications()
+        live = [job for job in kept if job["url"] not in applications]
+        pending = [job for job in live if job["url"] not in reviewed]
+        top = (live if args.recheck else pending)[:limit]
         chosen = {job["url"] for job in top}
-        previously = [job for job in kept[:limit]
+        previously = [job for job in live[:limit]
                       if job["url"] in reviewed and job["url"] not in chosen]
+        applied = [job for job in kept if job["url"] in applications]
         print(f"\n[llm] reading {len(top)} full description(s): "
               f"{len(pending)} never reviewed, {len(kept)} open in total"
               + (", --recheck on" if args.recheck else "") + "...")
         if previously:
             print(f"  {len(previously)} already-reviewed posting(s) skipped "
                   f"(they held these slots before; --recheck to re-read).")
+        if applied:
+            print(f"  {len(applied)} posting(s) you already applied to skipped "
+                  f"(listed at the top of the report).")
         fetched = fill_missing_descriptions(top)
         if fetched:
             print(f"  {fetched} of them read from LinkedIn "
@@ -490,8 +623,10 @@ def main() -> int:
         today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
         path = SEEN_PATH.parent / f"review-{today}.md"
         path.parent.mkdir(exist_ok=True)
-        path.write_text(render(top, verdicts, today, previously, reviewed),
-                        encoding="utf-8")
+        path.write_text(
+            render(top, verdicts, today, previously, reviewed,
+                   applied, applications),
+            encoding="utf-8")
         print(f"Review written to {path.relative_to(ROOT)} "
               f"(gitignored; memory and digests untouched)")
         # Ordered by irreversibility, like save_seen() after write_digest():

@@ -15,6 +15,9 @@ uv run jobwatch.py --profile pierre            # collect -> filter -> score -> d
 uv run jobwatch.py --profile pierre --dry-run  # collect and filter only: writes nothing, sends nothing
 uv run jobwatch.py --profile pierre --llm      # local qualitative pass on the finalists (see below)
 uv run jobwatch.py --profile pierre --llm --top 40  # one-off sweep: the 40 best-scoring open postings
+uv run jobwatch.py --profile pierre --llm --recheck # also re-read postings already judged
+uv run jobwatch.py --profile pierre --applications  # what you applied to, by status
+uv run jobwatch.py --profile pierre --applied <url> --status rejected --note "..."
 uv add <package>                # adds to pyproject.toml and relocks
 uv lock                         # after editing pyproject.toml by hand
 ```
@@ -91,8 +94,15 @@ Four stages, all driven from `main()` in `jobwatch.py`:
    truncated answer that no longer parses. A batch that fails is reported and skipped,
    the others still return their verdicts.
 
+   The pass reads the best-scoring open postings **it has never read before**,
+   and skips the ones you have applied to. Both memories are described under
+   Memory below. `--recheck` puts the already-read ones back in the running;
+   nothing puts an application back, because an application is a fact rather
+   than a verdict to revise.
+
    **`--llm` never runs in CI and never writes shared state**: no digest, no
-   `data/seen.json`, no mail. That is deliberate. The cloud run stays free,
+   `data/seen.json`, no mail. It does write two gitignored local memories,
+   `data/reviewed.json` and `data/applications.json`. That is deliberate. The cloud run stays free,
    credential-free and fully explainable; the expensive read happens on the
    machine of whoever has twenty minutes to act on it. The candidate profile
    the model screens against lives at `[llm].profile_path` (default
@@ -124,11 +134,36 @@ the next one. Email notification stays after the save, because the digest file
 on disk is the durable record and mailing is best-effort. Keep that ordering
 when touching `main()`.
 
+There are three memories, and they answer three different questions. Only the
+first is committed; the other two are covered by `profiles/*/data/*` and must
+stay that way, because a verdict names an employer and an application names who
+rejected you and who is still interviewing you.
+
+| File | Question | Written by |
+|---|---|---|
+| `data/seen.json` | has the digest ever surfaced this? | every run |
+| `data/reviewed.json` | has the model ever read this? | `--llm` |
+| `data/applications.json` | what did I do about it? | `--applied` |
+
+`reviewed.json` exists because ranking alone cannot spend reading slots well: a
+target employer is worth up to +30 in `[scoring.company]`, so its whole board
+outranks any unknown company every day. Nine postings took 81 of the first 146
+reads, and two better ones were never read at all. Same ordering rule as
+`save_seen()`: `save_reviewed()` runs only after the report is on disk, and
+only postings the model actually answered for are recorded, so a failed batch
+does not bury ten postings for good.
+
+`applications.json` exists because the model rediscovers closed files: left to
+itself it will return "apply" on a posting that was applied to weeks ago, or
+one the employer already turned down. `--applied <url>` records one and stops, touching
+no board and no mailbox, so recording a rejection works with the network down.
+`--date` backfills an old one rather than stamping it with today.
+
 ### Profiles
 
 `--profile NAME` selects whose search is being run. Everything is read from
 and written to `profiles/NAME/`: `config.toml`, `.env`, `data/seen.json`,
-`data/profile.md`, `digests/`. **Every path named elsewhere in this file is
+`data/reviewed.json`, `data/applications.json`, `data/profile.md`, `digests/`. **Every path named elsewhere in this file is
 relative to the active profile**, and there is no default profile at the
 repository root: without the flag the run stops on a missing-config message.
 The owner's profile is `profiles/pierre/`, which is what the cloud workflow
