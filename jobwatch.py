@@ -23,13 +23,14 @@ import sys
 import time
 import tomllib
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
-from email_collector import fetch_email_jobs
+from email_collector import _slug, fetch_email_jobs
 from llm_review import load_profile, render, review, unavailable
 from notifier import send_digest
 from scoring import score_job
@@ -287,6 +288,101 @@ def save_applications(applications: dict[str, dict]) -> None:
         json.dumps(applications, indent=2, sort_keys=True, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def _fold_duplicates(jobs: list[dict], reviewed: dict[str, dict],
+                     applications: dict[str, dict]) -> list[dict]:
+    """Keep one record per opening when it reached the run by several routes.
+
+    An opening is not always collected once. LinkedIn and Indeed both mirror
+    ATS boards, so the same job arrives as two records under two urls, and a
+    site sometimes carries the same job twice over. Left alone every copy
+    spends its own reading slot and comes back with its own verdict, and the
+    same posting has been answered "apply" under one url and "dig" under the
+    other on the same day.
+
+    What must NOT be folded is one title opened in several places. A board
+    commonly publishes one posting per location, so the same senior title
+    exists in two countries at once, and a role can be open in two cities of
+    the same country. Folding those would hide real openings, which is the
+    opposite of the point. Hence the rule: one title and one employer are one
+    posting when the copies come from different sites, one mirroring the
+    other, or when they come from the same site and name the same place.
+    Replayed over the postings already read, it folds eleven copies and
+    leaves every multi-location group alone.
+
+    Places are compared as sets of words, not as strings, because the same
+    place is rarely spelled twice the same way: "Paris" and "Paris, Île de
+    France, France" are one location written by two sites, "Bron" and
+    "Versailles" are two. A copy that names no place at all is not held back
+    by it, the way a card with no employer is matched on its title alone.
+
+    The survivor is chosen, never taken at random. A url you applied to wins,
+    so a file already closed stays recognised as closed instead of coming
+    back under its twin's url: an application recorded weeks earlier has been
+    handed back as a fresh recommendation that way. A url already read comes
+    next, so no slot judges again what already has a verdict. Only then does
+    the score decide, and since the list arrives sorted that keeps whichever
+    location variant suits this profile best. What the survivor lacks, the copies hand
+    over before they step aside, the description the model reads and the
+    referral signal included.
+
+    Scope is deliberate: this serves the reading pass only. The digest and
+    seen.json keep every url they have always had, because dropping one here
+    would make it look new again tomorrow.
+    """
+    def site(url: str) -> str:
+        host = urlsplit(url).netloc.lower()
+        return host[4:] if host.startswith("www.") else host
+
+    def place(job: dict) -> frozenset:
+        return frozenset(_slug(job.get("location", "")).split())
+
+    def one_posting(first: dict, second: dict) -> bool:
+        if site(first["url"]) != site(second["url"]):
+            return True
+        here, there = place(first), place(second)
+        return here <= there or there <= here
+
+    def standing(job: dict) -> tuple[bool, bool]:
+        # False sorts first, so an applied url wins, then a read one.
+        return (job["url"] not in applications, job["url"] not in reviewed)
+
+    groups: list[list[int]] = []
+    by_name: dict[tuple[str, str], list[int]] = {}
+    for position, job in enumerate(jobs):
+        name = (_slug(job.get("title", "")), _slug(job.get("company", "")))
+        if not name[0] or not name[1]:
+            # No title or no employer, no identity. _fold_twins() can afford
+            # to match on a title alone because it works inside one mailbox
+            # and one window; here the run spans every site at once, and two
+            # employers sharing a plain title would merge into one.
+            groups.append([position])
+            continue
+        home = by_name.setdefault(name, [])
+        for slot in home:
+            if one_posting(jobs[groups[slot][0]], job):
+                groups[slot].append(position)
+                break
+        else:
+            home.append(len(groups))
+            groups.append([position])
+
+    kept: set[int] = set()
+    for group in groups:
+        keeper = min(group, key=lambda position: standing(jobs[position]))
+        for position in group:
+            if position == keeper:
+                continue
+            # "content" is the description the model reads, and carrying it
+            # over also spares the survivor a LinkedIn fetch it no longer
+            # needs. "network" is the referral signal, which only the email
+            # copy of a posting ever has.
+            for field in ("content", "network", "source", "location", "company"):
+                if not jobs[keeper].get(field) and jobs[position].get(field):
+                    jobs[keeper][field] = jobs[position][field]
+        kept.add(keeper)
+    return [job for position, job in enumerate(jobs) if position in kept]
 
 
 def record_application(url: str, status: str, note: str, date: str = "",
@@ -656,6 +752,13 @@ def main() -> int:
         kept.sort(key=lambda job: job["score"], reverse=True)
         limit = args.top or llm_cfg.get("top_n", 10)
         reviewed = load_reviewed()
+        applications = load_applications()
+        # One opening, one record. The same job reaches the run by several
+        # routes and each copy would otherwise spend its own slot and come
+        # back with its own verdict.
+        copies = len(kept)
+        kept = _fold_duplicates(kept, reviewed, applications)
+        copies -= len(kept)
         # Spend the reading slots on what has NOT been read yet. The ranking
         # alone cannot do this: a target employer is worth up to +30, so its
         # whole board outranks any unknown company every single day, and the
@@ -669,7 +772,6 @@ def main() -> int:
         # --recheck does not bring it back: an application is a fact, not a
         # verdict to revise. Without this the model keeps recommending closed
         # files, having no way to know they are closed.
-        applications = load_applications()
         live = [job for job in kept if job["url"] not in applications]
         pending = [job for job in live if job["url"] not in reviewed]
         top = (live if args.recheck else pending)[:limit]
@@ -680,6 +782,9 @@ def main() -> int:
         print(f"\n[llm] reading {len(top)} full description(s): "
               f"{len(pending)} never reviewed, {len(kept)} open in total"
               + (", --recheck on" if args.recheck else "") + "...")
+        if copies:
+            print(f"  {copies} duplicate record(s) folded into the posting "
+                  f"they copy (another site, or the same one twice).")
         if previously:
             print(f"  {len(previously)} already-reviewed posting(s) skipped "
                   f"(they held these slots before; --recheck to re-read).")
