@@ -13,6 +13,19 @@ include_keywords = [
     "program management",
     "project manager",
     "chef de projet",
+    # French, and deliberately shorter than the job title they stand for.
+    # A French board writes the same job a dozen ways: "chef de projet",
+    # "cheffe", "chef(fe)", "chef.fe", "chef-fe", "chef / cheffe", "chef ou
+    # cheffe". Listing the spellings would always be one short, and 44 real
+    # titles were being dropped on that alone. "de projet" catches every one
+    # of them, and "chargé de", "directeur de" and "pilote de" with them.
+    # Measured on 2118 real titles: 81 more kept in this profile's lane, 22
+    # more outside it, and not one English posting gained or lost.
+    "de projet",
+    "de programme",
+    # The two shapes that drop the "de" altogether.
+    "responsable projet",
+    "responsable programme",
 ]
 # Adjacence GTM technique (solutions architect, forward deployed, technical
 # account, partnerships) testée le 01/09 puis retirée le 02/09 : sur les 14
@@ -178,6 +191,20 @@ slug = "Iliad-Free"
 "senior" = 5
 "director" = -10
 "junior" = -15
+
+# French, weighted like the English twin above so the same job ranks the same
+# in either language. Until the collector could read a French board these
+# weights had nothing to score; once it could, the postings arrived and ranked
+# below generic English ones because nothing here spoke French. Checked
+# against 2118 real titles: 302 postings gain points, none lose any.
+"de projet" = 10        # twin of "project manager"
+"de programme" = 25     # twin of "program manager"
+"déploiement" = 15      # twin of "deployment"
+# No English twin, this is the network vocabulary the profile targets. On the
+# same 2118 titles "réseau" reaches network engineering roles only: a social
+# media title never gets here, it does not pass the filter.
+"réseau" = 10
+"fibre" = 10
 
 
 [scoring.company]
