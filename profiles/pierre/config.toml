@@ -132,6 +132,26 @@ name = "Cohere"
 ats = "ashby"
 slug = "cohere"
 
+# The two entries below are the first French employers on this list, and they
+# are here because the collector learned to read two more ATS. Neither could be
+# reached before, which looked from the outside like an absence of postings.
+
+# Teamtailor. The slug is the subdomain, and it answers even though the site is
+# served from the employer's own domain.
+[[companies]]
+name = "OpCore"
+ats = "teamtailor"
+slug = "opcore"
+
+# SmartRecruiters, and the largest board on this list by far, a few hundred
+# postings against a few dozen for the tech boards above. Mind the slug's
+# capitals: an unknown company answers 200 with an empty board rather than an
+# error, so a typo reads exactly like a board with nothing open.
+[[companies]]
+name = "Iliad - Free"
+ats = "smartrecruiters"
+slug = "Iliad-Free"
+
 # Google, Microsoft, AWS and Meta have proprietary career sites without a
 # public ATS API: they are covered through LinkedIn per-company email alerts
 # (zero code) and boosted by the scoring section below when they appear.

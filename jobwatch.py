@@ -121,10 +121,145 @@ def fetch_ashby(company: str, slug: str, content: bool = False) -> list[dict]:
     ]
 
 
+def fetch_teamtailor(
+    company: str, slug: str, content: bool = False
+) -> list[dict]:
+    """Postings from a Teamtailor career site's public JSON Feed.
+
+    Teamtailor's own API answers 406 without a token, which the zero-cost rule
+    puts out of reach, but every career site publishes the same postings as a
+    JSON Feed at /jobs.json, description included.
+
+    `slug` is the Teamtailor subdomain, and only that. The subdomain answers
+    even when the employer serves its site from its own domain, so supporting
+    both would buy nothing and cost the one thing that matters here: the same
+    posting returns a different url through each door, and the url is what the
+    memory remembers it by.
+    """
+    jobs = []
+    page = f"https://{slug}.teamtailor.com/jobs.json"
+    requested = set()
+    while page and page not in requested:
+        requested.add(page)
+        data = _get_json(page)
+        jobs += [
+            {
+                "company": company,
+                "title": job.get("title", ""),
+                "location": _teamtailor_location(job),
+                "url": _teamtailor_url(slug, job),
+                # The feed ships the description with the listing, so asking
+                # for it costs no extra request, as on Ashby and Lever.
+                "content": (
+                    _plain_text(job.get("content_html", "")) if content else ""
+                ),
+            }
+            for job in data.get("items", [])
+        ]
+        # A page holds at most 100 postings, per_page is capped server-side,
+        # and the feed names its own continuation. Without this loop a board
+        # of 148 is collected as 100 and the other 48 look like a board with
+        # nothing more open. The set above is there so a feed that ever
+        # pointed at itself would stop rather than spin.
+        page = data.get("next_url")
+    return jobs
+
+
+def _teamtailor_url(slug: str, job: dict) -> str:
+    """The address a posting is remembered by, stripped of its title.
+
+    The feed's own url ends in a slug built from the title, so renaming a
+    posting would hand back a url no memory has seen: it would resurface in
+    the digest as new, spend a reading slot a second time, and shake off the
+    application recorded against it. The numeric id alone resolves, so that is
+    what gets stored, exactly as on the SmartRecruiters board below.
+    """
+    identifier = (job.get("_jobposting") or {}).get("identifier") or {}
+    job_id = identifier.get("value")
+    if not job_id:
+        # No id to build from: a title-bearing url still reaches the posting,
+        # which beats dropping it.
+        return job.get("url", "")
+    return f"https://{slug}.teamtailor.com/jobs/{job_id}"
+
+
+def _teamtailor_location(job: dict) -> str:
+    """Flatten the schema.org jobLocation a feed item carries.
+
+    The other boards hand over one free-text location; here it is a list of
+    postal addresses, and the scoring table needs it as a single string.
+    """
+    names = []
+    for place in (job.get("_jobposting") or {}).get("jobLocation") or []:
+        address = place.get("address") or {}
+        # addressRegion sometimes repeats the city and sometimes names the
+        # country, so keeping both and dropping duplicates yields "Paris,
+        # France" without producing "Paris, Paris".
+        parts = [address.get("addressLocality"), address.get("addressRegion")]
+        names.append(", ".join(dict.fromkeys(p for p in parts if p)))
+    return " / ".join(dict.fromkeys(n for n in names if n))
+
+
+# How many postings one SmartRecruiters page returns. Its API caps the value
+# at 100, and a board of a few hundred is normal there, unlike the tech boards
+# above: Iliad alone publishes around 260.
+SR_PAGE = 100
+
+
+def fetch_smartrecruiters(
+    company: str, slug: str, content: bool = False
+) -> list[dict]:
+    """Postings from a SmartRecruiters company board, page by page.
+
+    The only board here whose listing does not carry the description: it sits
+    behind a second request per posting, so asking for it at collection time
+    would mean hundreds of calls to read the handful that survive the title
+    filter. `content` is therefore accepted and deliberately ignored, and
+    fetch_smartrecruiters_description() reads the finalists only, under --llm.
+
+    Watch the slug: an unknown company answers 200 with an empty list rather
+    than 404, so a typo reads exactly like a board with nothing open.
+    """
+    jobs = []
+    offset = 0
+    while True:
+        page = _get_json(
+            f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
+            f"?limit={SR_PAGE}&offset={offset}"
+        )
+        postings = page.get("content", [])
+        jobs += [
+            {
+                "company": company,
+                "title": job.get("name", ""),
+                "location": (job.get("location") or {}).get(
+                    "fullLocation", ""
+                ),
+                # The listing omits postingUrl, which only the detail call
+                # returns. The id-only form resolves without the title slug,
+                # so it is built rather than guessed from the title.
+                "url": (
+                    "https://jobs.smartrecruiters.com/"
+                    f"{slug}/{job.get('id', '')}"
+                ),
+                "content": "",
+            }
+            for job in postings
+        ]
+        offset += len(postings)
+        # Either condition ends it on its own; both are here because a short
+        # page and an exhausted count are two different ways for this API to
+        # say "that was the last one", and an empty page must not loop.
+        if len(postings) < SR_PAGE or offset >= page.get("totalFound", 0):
+            return jobs
+
+
 FETCHERS = {
     "greenhouse": fetch_greenhouse,
     "lever": fetch_lever,
     "ashby": fetch_ashby,
+    "teamtailor": fetch_teamtailor,
+    "smartrecruiters": fetch_smartrecruiters,
 }
 
 
@@ -153,19 +288,51 @@ def fetch_linkedin_description(url: str) -> str:
     return body.get_text("\n", strip=True) if body else ""
 
 
+def fetch_smartrecruiters_description(url: str) -> str:
+    """Full text of a SmartRecruiters posting, or "" for any other url.
+
+    The sections are a company blurb, the job itself, the qualifications and
+    the practicalities; the model wants all four, so they are flattened in the
+    order the board lists them.
+    """
+    match = re.search(r"jobs\.smartrecruiters\.com/([^/]+)/(\d+)", url)
+    if not match:
+        return ""
+    data = _get_json(
+        "https://api.smartrecruiters.com/v1/companies/"
+        f"{match.group(1)}/postings/{match.group(2)}"
+    )
+    sections = (data.get("jobAd") or {}).get("sections") or {}
+    texts = (_plain_text((s or {}).get("text", "")) for s in sections.values())
+    return "\n\n".join(text for text in texts if text)
+
+
+def fetch_description(url: str) -> str:
+    """Full text of a posting whose listing did not carry one.
+
+    Two sources need this and they are unrelated: an email alert hands over a
+    title and a link, and a SmartRecruiters board keeps its descriptions one
+    request away from the listing.
+    """
+    if "smartrecruiters.com" in url:
+        return fetch_smartrecruiters_description(url)
+    return fetch_linkedin_description(url)
+
+
 def fill_missing_descriptions(jobs: list[dict]) -> int:
     """Fetch the description of finalists that arrived without one.
 
-    In practice only email-sourced postings get here empty-handed. A failure is
-    reported and skipped: reviewing one posting on its title is worse than
-    reviewing it in full, and far better than aborting the run.
+    Email-sourced and SmartRecruiters postings are the ones that get here
+    empty-handed. A failure is reported and skipped: reviewing one posting on
+    its title is worse than reviewing it in full, and far better than aborting
+    the run.
     """
     fetched = 0
     for job in jobs:
         if job.get("content"):
             continue
         try:
-            job["content"] = fetch_linkedin_description(job["url"])
+            job["content"] = fetch_description(job["url"])
         except Exception as exc:  # noqa: BLE001, report and move on
             print(f"  [!] no description for {job['title'][:40]}: {exc}")
             continue
