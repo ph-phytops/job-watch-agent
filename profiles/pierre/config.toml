@@ -26,6 +26,17 @@ include_keywords = [
     # The two shapes that drop the "de" altogether.
     "responsable projet",
     "responsable programme",
+    # "Capacity Delivery" is named as a target role further down this file and
+    # no keyword here reached it: the word "delivery" was missing entirely.
+    # What was being dropped is exactly the lane, not its edges: "Senior Data
+    # Center Capacity Delivery Manager", "Supply Chain Delivery Manager, Data
+    # Center Power & Cooling", "AI Delivery Manager - Paris". Measured on 2118
+    # real titles: 50 more kept in the lane, 2 outside it, both of them
+    # "Service Delivery Manager", which is adjacent rather than wrong.
+    "delivery manager",
+    "delivery lead",
+    "deployment lead",
+    "deployment manager",
 ]
 # Adjacence GTM technique (solutions architect, forward deployed, technical
 # account, partnerships) testée le 01/09 puis retirée le 02/09 : sur les 14
@@ -185,6 +196,9 @@ slug = "Iliad-Free"
 "capacity" = 20
 "compute" = 15
 "deployment" = 15
+# Same weight as "deployment", which it is the other half of: the target role
+# list in this file says "Capacity Delivery", and that phrase scored nothing.
+"delivery" = 15
 "freelance" = 10
 "cloud" = 10
 "project manager" = 10
