@@ -702,6 +702,16 @@ def write_digest(jobs: list[dict], errors: list[str], stats: dict) -> Path:
 
 
 def main() -> int:
+    # Windows defaults stdout to cp1252, which raises UnicodeEncodeError on
+    # any character outside it. Employer names routinely carry emoji, and an
+    # emoji in a listed company name crashed --dry-run after the mailbox had
+    # already been read, losing the whole run to a print statement. Printing
+    # is never worth failing a run for: replace what cannot be encoded and
+    # carry on.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Collect and report job postings.")
     parser.add_argument(
         "--dry-run",
