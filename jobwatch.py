@@ -54,6 +54,11 @@ STATUSES = ("applied", "interviewing", "rejected", "closed")
 # same board, where recording the wrong one silently pulls a live conversation
 # out of the ranking.
 UNDO_STATUS = "forget"
+# Sites that republish other companies' postings under their own name. They
+# are not employers, and treating their name as one is what lets the same
+# opening be read twice, once as theirs and once as the hiring company's.
+# Slugged form, as _slug() writes it.
+AGGREGATORS = frozenset({"jobgether"})
 TIMEOUT = 20
 HEADERS = {
     "User-Agent": "job-watch-agent/0.1 (personal project; "
@@ -517,8 +522,19 @@ def _fold_duplicates(jobs: list[dict], reviewed: dict[str, dict],
 
     groups: list[list[int]] = []
     by_name: dict[tuple[str, str], list[int]] = {}
+    by_title: dict[str, set[str]] = {}
+    republished: list[int] = []
     for position, job in enumerate(jobs):
-        name = (_slug(job.get("title", "")), _slug(job.get("company", "")))
+        title, company = _slug(job.get("title", "")), _slug(job.get("company", ""))
+        if title and company in AGGREGATORS:
+            # An aggregator prints its own name where the employer goes, so
+            # that name is not an identity: the same posting arrives once as
+            # "Jobgether" and once under the company that is actually hiring,
+            # and the two never meet. Held back here and matched on the title
+            # alone below, once every real employer in this run is known.
+            republished.append(position)
+            continue
+        name = (title, company)
         if not name[0] or not name[1]:
             # No title or no employer, no identity. _fold_twins() can afford
             # to match on a title alone because it works inside one mailbox
@@ -526,6 +542,7 @@ def _fold_duplicates(jobs: list[dict], reviewed: dict[str, dict],
             # employers sharing a plain title would merge into one.
             groups.append([position])
             continue
+        by_title.setdefault(title, set()).add(company)
         home = by_name.setdefault(name, [])
         for slot in home:
             if one_posting(jobs[groups[slot][0]], job):
@@ -534,6 +551,19 @@ def _fold_duplicates(jobs: list[dict], reviewed: dict[str, dict],
         else:
             home.append(len(groups))
             groups.append([position])
+
+    for position in republished:
+        owners = by_title.get(_slug(jobs[position].get("title", "")), set())
+        if len(owners) != 1:
+            # Nobody else carries that title, or several employers do and
+            # there is no telling which one this card republishes. Measured on
+            # 39 aggregator cards: six share a title with a board, five name a
+            # single employer, and the sixth is "Account Executive", carried by
+            # two. Folding that one would hide a real opening.
+            groups.append([position])
+            continue
+        name = (_slug(jobs[position].get("title", "")), next(iter(owners)))
+        groups[by_name[name][0]].append(position)
 
     kept: set[int] = set()
     for group in groups:
