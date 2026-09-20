@@ -44,7 +44,11 @@ def score_job(job: dict, cfg: dict) -> tuple[int, list[str]]:
     if job.get("network", ""):
         points = extras.get("network_bonus", 15)
         score += points
-        reasons.append(f"réseau {points:+d}")
+        # "relations" and not "réseau": this is the contact network, and a
+        # profile that searches for telecom work has "réseau" in its title
+        # table too. Printing both as "réseau" put two unrelated bonuses
+        # under one word in a digest whose whole point is being explainable.
+        reasons.append(f"relations {points:+d}")
 
     # Daily rate visible in the title (Free-Work shows €/day openly).
     # The en dash below is DATA, not prose: boards write day rates both as
