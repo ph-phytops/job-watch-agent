@@ -50,6 +50,9 @@ _INDEED_SOURCE = "Indeed (alerte email)"
 # mailbox owner, so it can be neither followed nor written to the memory the
 # repository tracks, and the posting has to be recognised by its card instead.
 _INDEED_REDIRECTOR = "engage.indeed.com"
+# Paid placements. No jk=, so _canonical_url() cannot key them; see
+# _untracked_indeed_posting() for how they are keyed instead.
+_INDEED_SPONSORED = "indeed.com/pagead/clk"
 
 # The identity rebuilt for such a card, which doubles as a usable link: a
 # plain Indeed search for the posting. It holds nothing but the title and the
@@ -241,15 +244,36 @@ def _extract_jobs(html: str) -> list[dict]:
 def _untracked_indeed_posting(anchor, href: str) -> dict | None:
     """A posting whose link names the recipient, keyed by its card instead.
 
+    Two kinds of link land here and they carry the same problem. A confirmation
+    letter routes through a redirector, and a sponsored card carries no jk= at
+    all, just 1.1 kB of per-recipient parameters (ad, xkcb, tmtk, alid) which
+    all change between two sends of the same posting. Neither can be written to
+    a memory that is committed, and neither dedupes against itself. So both are
+    keyed on what the card says rather than on where it points.
+
     Returns None for every other unrecognised link, which is what the vast
     majority of them are: an email is mostly navigation.
     """
-    if _INDEED_REDIRECTOR not in href:
+    if _INDEED_REDIRECTOR in href:
+        card = _split_indeed_confirmation_card(anchor)
+        if card is None:
+            return None
+        title, company, location = card
+    elif _INDEED_SPONSORED in href:
+        # A sponsored card is laid out like an ordinary alert card, measured
+        # on 327 of 327, so the same splitter reads it. Only the title has to
+        # come from the anchor, which is where the alert format keeps it.
+        sides = _split_indeed_alert_card(anchor)
+        if sides is None:
+            return None
+        title = _clean_title(" ".join(anchor.get_text(" ", strip=True).split()))
+        company, location = sides
+        # Without both, _search_url() would key the posting on a fragment and
+        # two different jobs could collapse into one.
+        if len(title) < 5 or not company:
+            return None
+    else:
         return None
-    card = _split_indeed_confirmation_card(anchor)
-    if card is None:
-        return None
-    title, company, location = card
     return {
         "company": company,
         "title": title,
