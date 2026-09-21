@@ -156,6 +156,16 @@ name = "Cohere"
 ats = "ashby"
 slug = "cohere"
 
+# A defence prime, and the largest Ashby board on this list at over 150
+# postings. Almost all of them are engineering, production and field titles:
+# only two cross the title filter today, and both sit outside Europe. Kept
+# anyway: it adds roughly forty postings a month, so the programme titles it
+# publishes rarely are still worth watching for.
+[[companies]]
+name = "Harmattan AI"
+ats = "ashby"
+slug = "harmattan-ai"
+
 # The two entries below are the first French employers on this list, and they
 # are here because the collector learned to read two more ATS. Neither could be
 # reached before, which looked from the outside like an absence of postings.
