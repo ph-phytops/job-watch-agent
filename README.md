@@ -53,7 +53,8 @@ rather than left implicit.
 ## Roadmap
 
 - [x] Project scaffolding and reproducible environment
-- [x] Source collection from public ATS APIs (Greenhouse, Lever, Ashby)
+- [x] Source collection from public ATS APIs (Greenhouse, Lever, Ashby,
+      Teamtailor, SmartRecruiters, Workday)
 - [x] Email-alert collection over IMAP (dedicated mailbox, read-only,
       credentials in a gitignored `.env`, see the example profile)
 - [x] Posting normalisation to a common shape
@@ -122,7 +123,10 @@ checkout can serve several people:
 
 1. **`config.toml`**: their target companies (find the ATS and slug from the
    careers page URL: `boards.greenhouse.io/<slug>`, `jobs.lever.co/<slug>`,
-   `jobs.ashbyhq.com/<slug>`), their title keywords and the scoring weights.
+   `jobs.ashbyhq.com/<slug>`, `<slug>.teamtailor.com`,
+   `jobs.smartrecruiters.com/<slug>`, or
+   `<tenant>.<dc>.myworkdayjobs.com/<site>`, whose slug is written
+   `tenant/dc/site`), their title keywords and the scoring weights.
 2. **`.env`**: a dedicated Gmail mailbox receiving their job alerts
    (LinkedIn/Indeed subscriptions or forwards), an app password, and the
    address where the digest should be delivered. Fill in the copied

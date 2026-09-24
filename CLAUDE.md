@@ -52,13 +52,17 @@ run command or the dependency install changes:
 Four stages, all driven from `main()` in `jobwatch.py`:
 
 1. **Collect**: one fetcher per ATS (`fetch_greenhouse`, `fetch_lever`,
-   `fetch_ashby`), registered in the `FETCHERS` dict keyed by the `ats` field
-   in `config.toml`. Adding a board means adding a function with the same
-   signature `(company, slug, content=False) -> list[dict]` and one
+   `fetch_ashby`, `fetch_teamtailor`, `fetch_smartrecruiters`,
+   `fetch_workday`), registered in the `FETCHERS` dict keyed by the `ats`
+   field in `config.toml`. Adding a board means adding a function with the
+   same signature `(company, slug, content=False) -> list[dict]` and one
    `FETCHERS` entry. `content=True` is only ever passed by `--llm`: it asks
    the ATS for the full description in the same request (Greenhouse
-   `?content=true`, Ashby and Lever `descriptionPlain`), and costs nothing
-   on a normal run because it is not requested.
+   `?content=true`, Ashby and Lever `descriptionPlain`, Teamtailor
+   `content_html`), and costs nothing on a normal run because it is not
+   requested. SmartRecruiters and Workday keep the description one request
+   per posting away from the listing, so they accept `content` and ignore
+   it, and `fetch_description()` reads their finalists under `--llm`.
    `email_collector.fetch_email_jobs` is a parallel collector reading a
    dedicated IMAP mailbox of job alerts.
 2. **Normalise**: every collector returns the same four-key shape
@@ -204,10 +208,26 @@ Two traps when writing a profile config:
   **above every `[section]` header**, otherwise it becomes a key of the
   preceding section and the run fails with a `KeyError`.
 
-Only Greenhouse, Lever and Ashby are supported, which covers tech and almost
-nothing else. Verify the targets respond before writing a list: French
-aerospace and most non-tech employers expose no public board API, and those
-profiles depend entirely on email alerts.
+Six boards are supported: Greenhouse, Lever and Ashby cover tech, Teamtailor
+and SmartRecruiters reach employers outside it, and Workday covers large
+groups. Verify the targets respond before writing a list: plenty of employers
+expose no public board API, and those profiles depend entirely on email
+alerts.
+
+Each board has one trap, and every one of them reads as an employer with
+nothing open rather than as an error:
+
+- **SmartRecruiters** answers 200 with an empty list for a slug that does not
+  exist, so a typo is indistinguishable from a quiet board.
+- **Teamtailor** paginates at 100 and names its own continuation in
+  `next_url`; without the loop a board of 148 is collected as 100.
+- **Workday** caps a page at 20, serves `total` on the first page only and 0
+  on every later one, and refuses to serve more than `WD_CAP` postings for
+  one query. Its slug is `tenant/dc/site`, optionally
+  `?countries=France, Germany`, because the data centre (`wdNN`) and the site
+  name cannot be derived from the tenant. Its public pages are a single-page
+  app that answers 200 for any path, so only the `/wday/cxs/` API can say
+  whether a posting exists.
 
 ### Configuration and secrets
 

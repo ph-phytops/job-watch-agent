@@ -38,9 +38,20 @@ senders = []
 enabled = true
 
 # --- Targets ------------------------------------------------------------
-# Only Greenhouse, Lever and Ashby are supported. Most employers outside tech
-# use neither, so CHECK BEFORE WRITING THE LIST: open the company careers page
-# and look for boards.greenhouse.io, jobs.lever.co or jobs.ashbyhq.com.
+# Six boards are supported. CHECK BEFORE WRITING THE LIST: open the company
+# careers page and look at the address it lands on.
+#
+#   boards.greenhouse.io/<slug>          ats = "greenhouse"
+#   jobs.lever.co/<slug>                 ats = "lever"
+#   jobs.ashbyhq.com/<slug>              ats = "ashby"
+#   <slug>.teamtailor.com                ats = "teamtailor"   (subdomain only)
+#   jobs.smartrecruiters.com/<slug>      ats = "smartrecruiters"
+#   <tenant>.<dc>.myworkdayjobs.com/<site>   ats = "workday"
+#
+# A wrong slug rarely looks wrong: SmartRecruiters answers an unknown company
+# with an empty list, not an error. If a target returns nothing, open its
+# board in a browser before assuming it has nothing open.
+#
 # If none of the targets qualify, use "companies = []" at the top of the file
 # and rely entirely on email alerts.
 
@@ -48,6 +59,19 @@ enabled = true
 name = "Example"
 ats = "greenhouse"
 slug = "example"
+
+# Workday needs all three parts of its address, because the data centre
+# (wd1, wd3, wd5...) and the site name cannot be guessed from the tenant.
+# Large groups publish thousands of postings there and the API refuses to
+# serve more than a couple of thousand for one query, so add ?countries= and
+# the board is read one country at a time. That also buys a real location:
+# a posting open in several places is listed as "5 Locations", which no
+# scoring table can read, and the country it was found under replaces it.
+#
+# [[companies]]
+# name = "Example Group"
+# ats = "workday"
+# slug = "exampletenant/wd3/External_Career_Site?countries=France, Germany"
 
 # --- Scoring ------------------------------------------------------------
 # Additive and explainable: every point appears in the digest with its reason.

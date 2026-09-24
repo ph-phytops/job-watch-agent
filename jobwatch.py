@@ -259,12 +259,234 @@ def fetch_smartrecruiters(
             return jobs
 
 
+# How many postings one Workday page returns. Its API caps the value at 20,
+# and asking for 21 hands back a body with no postings and no error, so a
+# larger page reads exactly like a board with nothing open.
+WD_PAGE = 20
+# Workday serves at most this many postings for one query and reports `total`
+# as that same number once a board is larger: NVIDIA answers 2000 while its
+# own facets add up to 2653. A board over the cap therefore cannot be read
+# whole, which is what the countries= form of the slug is for.
+WD_CAP = 2000
+# What the listing writes instead of a location when a posting is open in
+# several places ("2 Locations", "5 Locations"). Measured on a real board:
+# 79 of 102 European postings, so leaving it as the location would blind the
+# [scoring.location] table on three quarters of them.
+WD_MANY_PLACES = re.compile(r"^\d+\s+locations?$", re.I)
+# Seconds between two pages of the same query. Only this board needs pacing,
+# because only this board turns one employer into scores of requests.
+WD_PACE = 0.5
+
+
+def fetch_workday(
+    company: str, slug: str, content: bool = False
+) -> list[dict]:
+    """Postings from a Workday career site, one country at a time.
+
+    The slug carries the three parts a Workday address is built from, plus an
+    optional country list: "tenant/dc/site" or
+    "tenant/dc/site?countries=France, Germany". The data centre is the wdNN in
+    the hostname and differs per employer, so none of the three can be guessed
+    from the other two.
+
+    Like SmartRecruiters, the listing does not carry the description, so
+    `content` is accepted and ignored and fetch_workday_description() reads
+    the finalists only, under --llm.
+
+    Two behaviours of this API decide the shape of everything below. A board
+    over WD_CAP cannot be served whole, so it is refused rather than silently
+    halved. And a posting open in several countries is listed as "5
+    Locations", which carries no location at all, so each country is asked for
+    separately and answers for the postings it returns: it costs a handful of
+    extra requests (11 against 6 on a real board) and it is the difference
+    between a scored location and none.
+    """
+    tenant, dc, site, countries = _workday_parts(slug)
+    api = (
+        f"https://{tenant}.{dc}.myworkdayjobs.com/wday/cxs/"
+        f"{tenant}/{site}/jobs"
+    )
+    if not countries:
+        return [
+            _workday_job(company, tenant, dc, site, posting, "")
+            for posting in _workday_walk(api, {})
+        ]
+    param, ids = _workday_country_facet(api, countries)
+    jobs: dict[str, dict] = {}
+    # Over what resolved, not over what was asked for: a board offers only
+    # the countries it has a posting in today, and the rest were reported.
+    for country, facet_id in ids.items():
+        for posting in _workday_walk(api, {param: [facet_id]}):
+            job = _workday_job(company, tenant, dc, site, posting, country)
+            known = jobs.get(job["url"])
+            if known is None:
+                jobs[job["url"]] = job
+            elif job["location"] not in known["location"].split(" / "):
+                # The same posting comes back under each of its countries.
+                # Joining them beats keeping the first: "France / Germany"
+                # is what the posting says, and both are scored.
+                known["location"] += f" / {job['location']}"
+    return list(jobs.values())
+
+
+def _workday_parts(slug: str) -> tuple[str, str, str, list[str]]:
+    """Split "tenant/dc/site?countries=A, B" into its four pieces."""
+    address, _, query = slug.partition("?")
+    parts = [p for p in address.split("/") if p]
+    if len(parts) != 3:
+        raise ValueError(
+            f"workday slug must be tenant/dc/site, got {address!r}"
+        )
+    countries = []
+    if query:
+        key, _, value = query.partition("=")
+        if key != "countries":
+            raise ValueError(f"unknown workday slug option {key!r}")
+        countries = [c.strip() for c in value.split(",") if c.strip()]
+    return parts[0], parts[1], parts[2], countries
+
+
+def _workday_walk(api: str, facets: dict) -> list[dict]:
+    """Every posting for one query, page by page."""
+    postings: list[dict] = []
+    offset = 0
+    while True:
+        page = _post_json(
+            api,
+            {
+                "appliedFacets": facets,
+                "limit": WD_PAGE,
+                "offset": offset,
+                "searchText": "",
+            },
+        )
+        found = page.get("jobPostings", [])
+        if offset == 0 and page.get("total", 0) >= WD_CAP:
+            raise RuntimeError(
+                f"board serves at most {WD_CAP} postings and reports "
+                f"{page.get('total')}; narrow it with ?countries=... in the "
+                "slug, otherwise the rest is dropped without a word"
+            )
+        postings += found
+        offset += len(found)
+        # A short page is the only reliable end. `total` is served on the
+        # first page and comes back as 0 on every later one, so using it as
+        # the bound stops a 102-posting query at 40. The cap is a second
+        # bound so a board that never shortens cannot spin: anything at or
+        # over it was already refused above.
+        if len(found) < WD_PAGE or offset >= WD_CAP:
+            return postings
+        # Twenty per page turns a large board into scores of requests, and a
+        # board of 1493 answered seventy-odd of them by closing the
+        # connection. The other five boards never needed this because they
+        # answer in one call. Same courtesy as the description reads: this
+        # is a handful of public pages, not a crawl.
+        time.sleep(WD_PACE)
+
+
+def _workday_country_facet(api: str, wanted: list[str]) -> tuple[str, dict]:
+    """The facet parameter and ids that name the wanted countries.
+
+    Neither the parameter nor the ids are portable: NVIDIA files countries
+    under `locationHierarchy1`, Salesforce under a custom field whose name
+    runs to sixty characters, and the same country carries a different id on
+    each. Only the label is shared, so the facets are read and matched by it.
+
+    The match has to be exact, and that is what separates a country from a
+    site: a board that offers "France" also offers "France, Courbevoie" and
+    "France - Paris", and starting-with would silently collect one city.
+    """
+    base = _post_json(
+        api, {"appliedFacets": {}, "limit": WD_PAGE, "offset": 0,
+              "searchText": ""}
+    )
+    offered: dict[str, dict[str, str]] = {}
+    for param, label, ident in _workday_facet_values(base.get("facets")):
+        offered.setdefault(param, {})[(label or "").strip().casefold()] = ident
+    param, ids = "", {}
+    for candidate, labels in offered.items():
+        hits = {
+            country: labels[country.casefold()]
+            for country in wanted
+            if country.casefold() in labels
+        }
+        if len(hits) > len(ids):
+            param, ids = candidate, hits
+    missing = [country for country in wanted if country not in ids]
+    if missing and not ids:
+        # Nothing resolved at all: a misspelling, a board that files
+        # locations some other way, or an employer with nothing open in any
+        # of them. Whichever it is, carrying on would filter nothing and
+        # read as an employer with nothing open, so it stops here instead.
+        raise RuntimeError(
+            f"no country facet for {', '.join(missing)} on this board"
+        )
+    if missing:
+        # A board only offers the countries it currently has a posting in, so
+        # one going quiet is ordinary and must not take the whole employer
+        # down with it. Said out loud, because a country that silently stops
+        # being read looks exactly like a country with nothing open.
+        print(f"  [i] no posting in {', '.join(missing)} on this board today")
+    return param, ids
+
+
+def _workday_facet_values(facets):
+    """Walk a facet tree and yield (parameter, label, id) for every value.
+
+    Locations sit one level down, under a group that carries no values of its
+    own, and the level a tenant nests them at varies, so the tree is walked
+    rather than indexed.
+    """
+    for facet in facets or []:
+        param = facet.get("facetParameter")
+        values = facet.get("values") or []
+        groups = [
+            value for value in values
+            if isinstance(value, dict) and value.get("facetParameter")
+        ]
+        if groups:
+            yield from _workday_facet_values(groups)
+            continue
+        for value in values:
+            yield param, value.get("descriptor"), value.get("id")
+
+
+def _workday_job(
+    company: str, tenant: str, dc: str, site: str, posting: dict, country: str
+) -> dict:
+    """One listing record, normalised.
+
+    The url keeps the whole externalPath. The req id alone answers 404, and
+    so does the path with any other title, so neither can be trimmed away.
+    That is safe here for the reason it was not on Teamtailor: Workday freezes
+    the path at creation and a rename does not move it. Measured on a live
+    posting whose listed title had gained three words the path never took, so
+    the address the memory holds survives an employer editing the wording.
+    """
+    where = (posting.get("locationsText") or "").strip()
+    return {
+        "company": company,
+        "title": posting.get("title", ""),
+        # A posting open in several places names none of them, so the country
+        # it was found under is the only location on offer, and it beats a
+        # count of places that no scoring table can read.
+        "location": country if country and WD_MANY_PLACES.match(where)
+        else where,
+        "url": (
+            f"https://{tenant}.{dc}.myworkdayjobs.com/{site}"
+            f"{posting.get('externalPath', '')}"
+        ),
+        "content": "",
+    }
+
+
 FETCHERS = {
     "greenhouse": fetch_greenhouse,
     "lever": fetch_lever,
     "ashby": fetch_ashby,
     "teamtailor": fetch_teamtailor,
     "smartrecruiters": fetch_smartrecruiters,
+    "workday": fetch_workday,
 }
 
 
@@ -312,15 +534,42 @@ def fetch_smartrecruiters_description(url: str) -> str:
     return "\n\n".join(text for text in texts if text)
 
 
+def fetch_workday_description(url: str) -> str:
+    """Full text of a Workday posting, or "" for any other url.
+
+    The public page is a single-page app: it answers 200 for any path it is
+    handed, including one that names no posting, so it can say nothing about
+    whether a posting exists. The same path under /wday/cxs/ answers in JSON
+    and 404s when it is wrong, which is why the description is read there.
+    """
+    match = re.match(
+        r"https://([^.]+)\.(wd\d+)\.myworkdayjobs\.com/"
+        r"(?:[a-z]{2}-[A-Z]{2}/)?([^/]+)(/job/.+)$",
+        url,
+    )
+    if not match:
+        return ""
+    tenant, dc, site, path = match.groups()
+    data = _get_json(
+        f"https://{tenant}.{dc}.myworkdayjobs.com/wday/cxs/"
+        f"{tenant}/{site}{path}"
+    )
+    return _plain_text((data.get("jobPostingInfo") or {}).get(
+        "jobDescription", ""
+    ))
+
+
 def fetch_description(url: str) -> str:
     """Full text of a posting whose listing did not carry one.
 
-    Two sources need this and they are unrelated: an email alert hands over a
-    title and a link, and a SmartRecruiters board keeps its descriptions one
-    request away from the listing.
+    Three sources need this and they are unrelated: an email alert hands over
+    a title and a link, and the SmartRecruiters and Workday boards both keep
+    their descriptions one request away from the listing.
     """
     if "smartrecruiters.com" in url:
         return fetch_smartrecruiters_description(url)
+    if "myworkdayjobs.com" in url:
+        return fetch_workday_description(url)
     return fetch_linkedin_description(url)
 
 
@@ -357,6 +606,19 @@ def _plain_text(html: str) -> str:
 def _get_json(url: str):
     """GET a URL and return its JSON body, raising on HTTP errors."""
     response = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+    response.raise_for_status()
+    return response.json()
+
+
+def _post_json(url: str, body: dict):
+    """POST a JSON body and return the JSON answer, raising on HTTP errors.
+
+    Only Workday needs this: it is the one board here that takes its query in
+    a body rather than a query string. Its wrong-name answers are loud, 422
+    for an unknown tenant and 404 for an unknown site, so raise_for_status()
+    catches a typo that on SmartRecruiters would have read as an empty board.
+    """
+    response = requests.post(url, json=body, headers=HEADERS, timeout=TIMEOUT)
     response.raise_for_status()
     return response.json()
 
