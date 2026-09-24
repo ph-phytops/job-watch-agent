@@ -186,6 +186,18 @@ name = "Iliad - Free"
 ats = "smartrecruiters"
 slug = "Iliad-Free"
 
+
+[[companies]]
+name = "NVIDIA"
+ats = "workday"
+slug = "nvidia/wd5/NVIDIAExternalCareerSite?countries=France, Netherlands, United Kingdom, Germany, Spain, Finland"
+
+[[companies]]
+name = "Equinix"
+ats = "workday"
+slug = "equinix/wd1/External?countries=France"
+
+
 # Google, Microsoft, AWS and Meta have proprietary career sites without a
 # public ATS API: they are covered through LinkedIn per-company email alerts
 # (zero code) and boosted by the scoring section below when they appear.
