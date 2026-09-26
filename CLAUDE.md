@@ -53,7 +53,8 @@ Four stages, all driven from `main()` in `jobwatch.py`:
 
 1. **Collect**: one fetcher per ATS (`fetch_greenhouse`, `fetch_lever`,
    `fetch_ashby`, `fetch_teamtailor`, `fetch_smartrecruiters`,
-   `fetch_workday`), registered in the `FETCHERS` dict keyed by the `ats`
+   `fetch_workday`, `fetch_collective`), registered in the `FETCHERS` dict
+   keyed by the `ats`
    field in `config.toml`. Adding a board means adding a function with the
    same signature `(company, slug, content=False) -> list[dict]` and one
    `FETCHERS` entry. `content=True` is only ever passed by `--llm`: it asks
@@ -63,6 +64,9 @@ Four stages, all driven from `main()` in `jobwatch.py`:
    requested. SmartRecruiters and Workday keep the description one request
    per posting away from the listing, so they accept `content` and ignore
    it, and `fetch_description()` reads their finalists under `--llm`.
+   Collective is not a board but a public search of a freelance
+   marketplace: its listing carries the description, and each posting keeps
+   the company it names rather than the target's `name`.
    `email_collector.fetch_email_jobs` is a parallel collector reading a
    dedicated IMAP mailbox of job alerts.
 2. **Normalise**: every collector returns the same four-key shape
@@ -210,7 +214,8 @@ Two traps when writing a profile config:
 
 Six boards are supported: Greenhouse, Lever and Ashby cover tech, Teamtailor
 and SmartRecruiters reach employers outside it, and Workday covers large
-groups. Verify the targets respond before writing a list: plenty of employers
+groups. A seventh source, Collective, is a marketplace search rather than an
+employer's board. Verify the targets respond before writing a list: plenty of employers
 expose no public board API, and those profiles depend entirely on email
 alerts.
 
@@ -228,6 +233,20 @@ nothing open rather than as an error:
   name cannot be derived from the tenant. Its public pages are a single-page
   app that answers 200 for any path, so only the `/wday/cxs/` API can say
   whether a posting exists.
+- **Collective** answers 200 whatever the URL says and silently drops a
+  parameter it does not know, serving its default listing (every posting it
+  holds) instead of the search. The query the page echoes back in its
+  `__NEXT_DATA__` is therefore compared with the one asked for before
+  anything is kept. It pages by 30 but nothing in the request fixes that
+  size, so the walk is bounded by the `total` served on every page, never by
+  a short page: it stops on the count or on a page that adds nothing new,
+  walks once more when postings are missing (relevance order reshuffles ties
+  between requests, so one can slide across a page boundary), and fails the
+  target when more than `COLLECTIVE_SLACK` is still missing. It has no date
+  sort and caps `total` at `COLLECTIVE_CAP`. Its alert emails name no posting at all; only its
+  "new opportunity" emails do, and every link in them except the public
+  `www.collective.work/jobs/<lang>/<slug>` page is a per-member
+  `app.collective.work` address that must never reach `seen.json`.
 
 ### Configuration and secrets
 

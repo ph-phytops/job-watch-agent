@@ -197,6 +197,17 @@ name = "Equinix"
 ats = "workday"
 slug = "equinix/wd1/External?countries=France"
 
+# Collective, a freelance marketplace. The target is a public search, not an
+# employer, and each posting keeps the company it names. The search ranks by
+# relevance and serves missions from months back next to today's, so days=
+# drops anything published longer ago than that. Its alert emails cannot
+# stand in for this: they count the new postings and link to the logged-in
+# app, without naming a single one.
+[[companies]]
+name = "Collective"
+ats = "collective"
+slug = "chef de projet data?contractType=Freelance&days=60"
+
 
 # Google, Microsoft, AWS and Meta have proprietary career sites without a
 # public ATS API: they are covered through LinkedIn per-company email alerts

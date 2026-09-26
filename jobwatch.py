@@ -22,8 +22,9 @@ import re
 import sys
 import time
 import tomllib
+import unicodedata
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 import requests
@@ -480,6 +481,284 @@ def _workday_job(
     }
 
 
+# Collective (collective.work) is a freelance marketplace, not an ATS, so its
+# "board" is a search rather than an employer: the public search page renders
+# its results server side and ships them in the page's __NEXT_DATA__, the
+# same way its own front end receives them.
+COLLECTIVE_SEARCH = "https://www.collective.work/jobs/fr"
+COLLECTIVE_POSTING = "https://www.collective.work/jobs/fr/"
+# The search reports `total` as 1500 whenever there is more (labelled "2 000+"
+# on the page), exactly like Workday's cap: a query that wide cannot be read
+# whole, so it is refused rather than silently cut. Page 51 of such a query
+# answers 307, so the cap is also the last page the site will serve.
+COLLECTIVE_CAP = 1500
+# Seconds between two pages. A narrowed search is a handful of pages, but
+# they are full HTML pages of a few hundred kilobytes, not an API.
+COLLECTIVE_PACE = 0.5
+# The URL options the search honours, measured one by one. `sort` is not among
+# them, and neither is a page size: the site serves 30 per page, and nothing
+# in the request can hold it there.
+COLLECTIVE_OPTIONS = ("contractType", "hasDailyRate", "exclusive")
+# Postings the walk may miss before it is treated as broken rather than as
+# relevance noise. The order is relevance only and reshuffles ties between two
+# identical requests, so a posting can slide across a page boundary between two
+# pages of the same walk: measured once in seven live walks, one posting of 53.
+# A second walk usually recovers it. A shortfall larger than this is not noise
+# but a site change (a smaller page, `page` ignored) and fails the target.
+COLLECTIVE_SLACK = 0.05
+# Smallest page the site could plausibly serve, used only to bound the walk at
+# the cap: never more than 150 requests, even if the page shrank to 10 and the
+# checks in the walk were somehow defeated.
+COLLECTIVE_PAGE_BOUND = 10
+# How the listing names a posting's work mode, in the words the email cards
+# use, so the same [scoring.location] keys read both routes.
+COLLECTIVE_MODES = {
+    "REMOTE": "À distance",
+    "HYBRID": "Hybride",
+    "ON_SITE": "Sur site",
+}
+
+
+def fetch_collective(
+    company: str, slug: str, content: bool = False
+) -> list[dict]:
+    """Postings from one public Collective search, page by page.
+
+    The slug is the search text, optionally followed by the options the site
+    honours plus one of our own, the way a Workday slug carries its countries:
+    "chef de projet data?contractType=Freelance&days=60". `days` drops what was
+    published longer ago than that. The search is ordered by relevance and has
+    no date sort, so it serves missions from months ago next to this morning's.
+
+    The employer of each posting is the one the posting names, not the target
+    name: one search spans hundreds of companies, most of them agencies
+    placing a mission for a client they do not name.
+
+    The listing carries the full description, like Greenhouse with content,
+    so there is nothing left to fetch under --llm.
+
+    The walk is bounded by the count, never by the shape of a page. Nothing in
+    the request fixes the page size, so "a short page is the end" would read a
+    site that moved to 20 per page as a search with 20 results, every run. The
+    site serves `total` on every page, so the walk collects until it holds
+    that many distinct postings, and a page that adds nothing new ends it
+    (past the end the site answers an empty page; with `page` ignored it
+    answers page one again). What is still missing then gets one more walk,
+    and a shortfall beyond COLLECTIVE_SLACK fails the target out loud.
+    """
+    search, options, days = _collective_parts(slug)
+    params = {"search": search, **options}
+    projects: dict[str, dict] = {}
+    total = 0
+    for attempt in (1, 2):
+        # Newness is judged within one walk: a second walk starts over from
+        # page one, which the first walk already holds entirely.
+        this_walk: set[str] = set()
+        page = 1
+        while True:
+            results, echoed = _collective_search_page({**params, "page": page})
+            if attempt == 1 and page == 1:
+                _collective_check_echo(echoed, search, options)
+                total = _collective_total(results)
+            found = results.get("projects")
+            if not isinstance(found, list):
+                raise RuntimeError("search results no longer list projects")
+            fresh = 0
+            for project in found:
+                key = project.get("id") or project.get("slug")
+                if not key or key in this_walk:
+                    continue
+                this_walk.add(key)
+                fresh += 1
+                projects.setdefault(key, project)
+            if not fresh or len(projects) >= total:
+                break
+            if page * COLLECTIVE_PAGE_BOUND >= COLLECTIVE_CAP:
+                break
+            page += 1
+            time.sleep(COLLECTIVE_PACE)
+        if len(projects) >= total:
+            break
+        time.sleep(COLLECTIVE_PACE)
+    missing = total - len(projects)
+    if missing > total * COLLECTIVE_SLACK:
+        raise RuntimeError(
+            f"search reports {total} postings and served {len(projects)}; "
+            "its paging changed (page size, or the page parameter ignored)"
+        )
+    if missing > 0:
+        # Relevance noise, not a fault: the posting is not in seen.json, so
+        # the next run offers it again. Said out loud all the same.
+        print(f"  [i] {company}: served {len(projects)} of {total}, "
+              f"{missing} left for the next run")
+    usable = [p for p in projects.values() if p.get("slug") and p.get("name")]
+    if projects and not usable:
+        # Every posting lacks a slug or a title: the site renamed a field,
+        # and an empty list here would read as a quiet search.
+        raise RuntimeError("search postings no longer carry a slug or name")
+    oldest = (
+        (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days))
+        .strftime("%Y-%m-%dT%H:%M:%S")
+        if days else ""
+    )
+    jobs: dict[str, dict] = {}
+    for project in usable:
+        published = project.get("publishedAt") or ""
+        # A posting with no date is kept: dropping it would read as "too
+        # old", and a renamed field would then empty the whole target.
+        if oldest and published and published < oldest:
+            continue
+        job = _collective_job(company, project, content)
+        jobs.setdefault(job["url"], job)
+    return list(jobs.values())
+
+
+def _collective_total(results: dict) -> int:
+    """The posting count page one reports, refusing a search over the cap.
+
+    Required, not defaulted: without it the cap check and the completeness
+    check both go blind, and a too-wide search would be cut at 1500 silently.
+    """
+    total = (results.get("pagination") or {}).get("total")
+    if not isinstance(total, int):
+        raise RuntimeError("search results no longer report a total")
+    if total >= COLLECTIVE_CAP:
+        raise RuntimeError(
+            f"search reports {total} postings, the most it will serve; "
+            "narrow it (contractType=..., a longer search) or the rest is "
+            "dropped without a word"
+        )
+    return total
+
+
+def _collective_parts(slug: str) -> tuple[str, dict, int]:
+    """Split "search text?opt=value&days=60" into search, options, days."""
+    search, _, query = slug.partition("?")
+    # NFC because the site echoes the exact code points it received: text
+    # pasted in decomposed form would pass the echo check and match nothing.
+    search = unicodedata.normalize("NFC", " ".join(search.split()))
+    if not search:
+        # An empty search is the site's default listing, every posting it
+        # holds. That is never a watch, only a typo.
+        raise ValueError("collective slug needs search text before '?'")
+    options: dict[str, str] = {}
+    days = 0
+    for pair in filter(None, query.split("&")):
+        key, _, value = pair.partition("=")
+        key, value = key.strip(), value.strip()
+        if key == "days":
+            days = int(value)
+            if days < 0:
+                # A cutoff in the future would drop every posting in silence.
+                raise ValueError(f"collective days= must be positive, got {days}")
+        elif key in COLLECTIVE_OPTIONS:
+            options[key] = value
+        else:
+            raise ValueError(f"unknown collective slug option {key!r}")
+    return search, options, days
+
+
+def _collective_search_page(params: dict) -> tuple[dict, dict]:
+    """One results page and the query the site says it ran."""
+    data = _collective_next_data(
+        f"{COLLECTIVE_SEARCH}?{urlencode(params)}"
+    )
+    for query in (data.get("dehydratedState") or {}).get("queries") or []:
+        key = query.get("queryKey") or []
+        if key and key[0] == "PublicPages_SearchJobs":
+            echoed = (key[1] if len(key) > 1 else {}).get("data") or {}
+            results = ((query.get("state") or {}).get("data") or {}).get(
+                "results"
+            ) or {}
+            return results, echoed
+    raise RuntimeError("search page no longer carries its results")
+
+
+def _collective_check_echo(echoed: dict, search: str, options: dict) -> None:
+    """Stop when the site ran a different query from the one asked for.
+
+    The page answers 200 whatever the URL says, and a parameter it does not
+    understand is dropped without a word: asked with ?query= instead of
+    ?search=, it serves its default listing, every posting it holds. That
+    reads exactly like a busy search, so the query the site echoes back is
+    compared with ours before a single posting is kept.
+    """
+    if echoed.get("isDefaultSearch") or (
+        (echoed.get("query") or "").casefold() != search.casefold()
+    ):
+        raise RuntimeError(
+            f"site ignored the search {search!r}; its URL parameters changed"
+        )
+    for key, value in options.items():
+        if str(echoed.get(key)).casefold() != value.casefold():
+            raise RuntimeError(
+                f"site ignored {key}={value} (ran {key}={echoed.get(key)!r})"
+            )
+
+
+def _collective_next_data(url: str) -> dict:
+    """The pageProps a public Collective page was rendered with.
+
+    Redirects are not followed: a posting address that names nothing answers
+    307 to the search page rather than 404, and following it would read a
+    listing where a posting was expected.
+    """
+    response = requests.get(
+        url, headers=HEADERS, timeout=TIMEOUT, allow_redirects=False
+    )
+    response.raise_for_status()
+    if response.status_code != 200:
+        raise RuntimeError(f"HTTP {response.status_code} for {url}")
+    match = re.search(
+        r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', response.text, re.S
+    )
+    if not match:
+        raise RuntimeError(f"no page data in {url}")
+    return (json.loads(match.group(1)).get("props") or {}).get(
+        "pageProps"
+    ) or {}
+
+
+def _collective_job(company: str, project: dict, content: bool) -> dict:
+    """One search result, normalised.
+
+    The url is the public posting page, never the app.collective.work one:
+    that address is built per member, so it would name the mailbox owner in
+    the memory the repository publishes. The slug ends in a short code and a
+    wrong or truncated slug answers 307, so the address cannot drift silently.
+    """
+    place = project.get("location") or {}
+    where = place.get("fullNameFrench") or place.get("fullNameEnglish") or ""
+    modes = project.get("workPreferences") or []
+    # One mode only, the way a LinkedIn card writes it: a posting offering
+    # every mode says nothing about any of them.
+    if len(modes) == 1 and modes[0] in COLLECTIVE_MODES:
+        mode = COLLECTIVE_MODES[modes[0]]
+        where = f"{where} ({mode})" if where else mode
+    text = ""
+    if content:
+        # The day rate and the contract type are the two facts a freelance
+        # mission is judged on first, and the description often omits both.
+        facts = [
+            f"Daily rate: {project['budgetBrief']}"
+            if project.get("budgetBrief") else "",
+            "Contract: " + ", ".join(project["contractTypes"])
+            if project.get("contractTypes") else "",
+            f"Published: {(project.get('publishedAt') or '')[:10]}",
+        ]
+        text = "\n".join(
+            [fact for fact in facts if fact]
+            + [_plain_text(project.get("description", ""))]
+        )
+    return {
+        "company": (project.get("company") or {}).get("name") or company,
+        "title": project.get("name", ""),
+        "location": where,
+        "url": COLLECTIVE_POSTING + (project.get("slug") or ""),
+        "content": text,
+    }
+
+
 FETCHERS = {
     "greenhouse": fetch_greenhouse,
     "lever": fetch_lever,
@@ -487,6 +766,7 @@ FETCHERS = {
     "teamtailor": fetch_teamtailor,
     "smartrecruiters": fetch_smartrecruiters,
     "workday": fetch_workday,
+    "collective": fetch_collective,
 }
 
 
@@ -564,13 +844,30 @@ def fetch_description(url: str) -> str:
 
     Three sources need this and they are unrelated: an email alert hands over
     a title and a link, and the SmartRecruiters and Workday boards both keep
-    their descriptions one request away from the listing.
+    their descriptions one request away from the listing. An email alert is
+    read at whichever site its link points to.
     """
     if "smartrecruiters.com" in url:
         return fetch_smartrecruiters_description(url)
     if "myworkdayjobs.com" in url:
         return fetch_workday_description(url)
+    if url.startswith(COLLECTIVE_POSTING):
+        return fetch_collective_description(url)
     return fetch_linkedin_description(url)
+
+
+def fetch_collective_description(url: str) -> str:
+    """Full text of a Collective posting that arrived by email.
+
+    The search collector already carries the description; this is for the
+    "new opportunity" emails, which carry a title and a link and nothing else.
+    """
+    project = _collective_next_data(url).get("project")
+    if not project:
+        # Raised, not returned empty, so fill_missing_descriptions() says so
+        # instead of sending the posting to the model on its title alone.
+        raise RuntimeError("posting page no longer carries its project")
+    return _collective_job("", project, True)["content"]
 
 
 def fill_missing_descriptions(jobs: list[dict]) -> int:
@@ -1195,6 +1492,17 @@ def main() -> int:
                     f"  [+] email alerts: {len(mail_jobs)} job links, "
                     f"{len(matching)} matching"
                 )
+
+    # One record per url. Until the Collective search, no two sources could
+    # hand over the same url: a board is one employer, and the mailbox dedupes
+    # itself. A Collective email now points at the posting the search already
+    # returned, and two overlapping searches return the same posting twice.
+    # The first record wins, and boards are collected before the mailbox, so
+    # the one that names the employer and carries the description survives.
+    unique: dict[str, dict] = {}
+    for job in kept:
+        unique.setdefault(job["url"], job)
+    kept = list(unique.values())
 
     # ---- Memory: only surface what previous runs have not shown ---------
     seen = load_seen()

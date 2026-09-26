@@ -54,7 +54,8 @@ rather than left implicit.
 
 - [x] Project scaffolding and reproducible environment
 - [x] Source collection from public ATS APIs (Greenhouse, Lever, Ashby,
-      Teamtailor, SmartRecruiters, Workday)
+      Teamtailor, SmartRecruiters, Workday) and from the public search of
+      the Collective freelance marketplace
 - [x] Email-alert collection over IMAP (dedicated mailbox, read-only,
       credentials in a gitignored `.env`, see the example profile)
 - [x] Posting normalisation to a common shape
@@ -126,7 +127,9 @@ checkout can serve several people:
    `jobs.ashbyhq.com/<slug>`, `<slug>.teamtailor.com`,
    `jobs.smartrecruiters.com/<slug>`, or
    `<tenant>.<dc>.myworkdayjobs.com/<site>`, whose slug is written
-   `tenant/dc/site`), their title keywords and the scoring weights.
+   `tenant/dc/site`; a Collective target is a search instead, written
+   `search text?contractType=Freelance&days=60`), their title keywords and
+   the scoring weights.
 2. **`.env`**: a dedicated Gmail mailbox receiving their job alerts
    (LinkedIn/Indeed subscriptions or forwards), an app password, and the
    address where the digest should be delivered. Fill in the copied

@@ -73,6 +73,17 @@ slug = "example"
 # ats = "workday"
 # slug = "exampletenant/wd3/External_Career_Site?countries=France, Germany"
 
+# Collective (collective.work), a freelance marketplace, is watched through a
+# search instead of an employer. The slug is the search text, then the site's
+# own filters (contractType, hasDailyRate, exclusive) and days=, which drops
+# postings older than that: the search has no date sort and keeps serving
+# missions from months back. A search too broad to be read whole is refused.
+#
+# [[companies]]
+# name = "Collective"
+# ats = "collective"
+# slug = "project manager?contractType=Freelance&days=60"
+
 # --- Scoring ------------------------------------------------------------
 # Additive and explainable: every point appears in the digest with its reason.
 # Title keywords accumulate; company and location keep their best match only.
