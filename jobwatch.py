@@ -58,8 +58,13 @@ UNDO_STATUS = "forget"
 # Sites that republish other companies' postings under their own name. They
 # are not employers, and treating their name as one is what lets the same
 # opening be read twice, once as theirs and once as the hiring company's.
-# Slugged form, as _slug() writes it.
+# Slugged form with its spaces removed, as _fold_duplicates() compares it.
 AGGREGATORS = frozenset({"jobgether"})
+# The work mode a location string may end with, written the way the email
+# cards and the Collective search write it.
+WORK_MODE = re.compile(
+    r"\((?:hybride|sur site|à distance|hybrid|on-site|remote)\)", re.I
+)
 TIMEOUT = 20
 HEADERS = {
     "User-Agent": "job-watch-agent/0.1 (personal project; "
@@ -506,6 +511,8 @@ COLLECTIVE_OPTIONS = ("contractType", "hasDailyRate", "exclusive")
 # A second walk usually recovers it. A shortfall larger than this is not noise
 # but a site change (a smaller page, `page` ignored) and fails the target.
 COLLECTIVE_SLACK = 0.05
+# The tail Free-Work appends to the postings Collective copies from it.
+COLLECTIVE_COPY_TAIL = re.compile(r"\s*\(IT\)\s*/\s*Freelance\s*$", re.I)
 # Smallest page the site could plausibly serve, used only to bound the walk at
 # the cap: never more than 150 requests, even if the page shrank to 10 and the
 # checks in the walk were somehow defeated.
@@ -554,6 +561,10 @@ def fetch_collective(
         # Newness is judged within one walk: a second walk starts over from
         # page one, which the first walk already holds entirely.
         this_walk: set[str] = set()
+        # Rows served in this walk, repeats included. The site's count can
+        # include one posting listed twice (measured: 260 rows, 259 distinct,
+        # on two runs in a row), and that is a repeat, not a missing posting.
+        rows = 0
         page = 1
         while True:
             results, echoed = _collective_search_page({**params, "page": page})
@@ -563,6 +574,7 @@ def fetch_collective(
             found = results.get("projects")
             if not isinstance(found, list):
                 raise RuntimeError("search results no longer list projects")
+            rows += len(found)
             fresh = 0
             for project in found:
                 key = project.get("id") or project.get("slug")
@@ -580,7 +592,10 @@ def fetch_collective(
         if len(projects) >= total:
             break
         time.sleep(COLLECTIVE_PACE)
-    missing = total - len(projects)
+    # Judged on the last walk: a posting served twice in it accounts for one
+    # unit of the gap, and only what is left over was really never served.
+    repeats = rows - len(this_walk)
+    missing = max(0, total - len(projects) - repeats)
     if missing > total * COLLECTIVE_SLACK:
         raise RuntimeError(
             f"search reports {total} postings and served {len(projects)}; "
@@ -752,7 +767,12 @@ def _collective_job(company: str, project: dict, content: bool) -> dict:
         )
     return {
         "company": (project.get("company") or {}).get("name") or company,
-        "title": project.get("name", ""),
+        # Postings copied from Free-Work end in "(IT) / Freelance", and only
+        # those: measured on a full search, 30 of the 40 Free-Work copies and
+        # none of the 220 others. The search is already filtered by contract
+        # type, so the tail says nothing, but left on it scored "freelance"
+        # for the copies alone and kept each one from folding with its twin.
+        "title": COLLECTIVE_COPY_TAIL.sub("", project.get("name", "")),
         "location": where,
         "url": COLLECTIVE_POSTING + (project.get("slug") or ""),
         "content": text,
@@ -1067,7 +1087,12 @@ def _fold_duplicates(jobs: list[dict], reviewed: dict[str, dict],
         return host[4:] if host.startswith("www.") else host
 
     def place(job: dict) -> frozenset:
-        return frozenset(_slug(job.get("location", "")).split())
+        # The work mode is not a place: "Paris (Hybride)" and "Paris (Sur
+        # site)" are one city, and two copies of one posting on the same
+        # site do not always agree on the mode. Only the mode is dropped,
+        # never a department: "Saint-Denis (93)" is not "Saint-Denis (974)".
+        where = WORK_MODE.sub("", job.get("location", ""))
+        return frozenset(_slug(where).split())
 
     def one_posting(first: dict, second: dict) -> bool:
         if site(first["url"]) != site(second["url"]):
@@ -1084,7 +1109,11 @@ def _fold_duplicates(jobs: list[dict], reviewed: dict[str, dict],
     by_title: dict[str, set[str]] = {}
     republished: list[int] = []
     for position, job in enumerate(jobs):
-        title, company = _slug(job.get("title", "")), _slug(job.get("company", ""))
+        # The employer is compared without its spaces: "Acme Staffing" and
+        # "AcmeStaffing" are one agency whose postings can reach the run under
+        # both spellings, the way two copies may differ only by case.
+        title = _slug(job.get("title", ""))
+        company = _slug(job.get("company", "")).replace(" ", "")
         if title and company in AGGREGATORS:
             # An aggregator prints its own name where the employer goes, so
             # that name is not an identity: the same posting arrives once as

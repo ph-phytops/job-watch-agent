@@ -242,7 +242,10 @@ nothing open rather than as an error:
   a short page: it stops on the count or on a page that adds nothing new,
   walks once more when postings are missing (relevance order reshuffles ties
   between requests, so one can slide across a page boundary), and fails the
-  target when more than `COLLECTIVE_SLACK` is still missing. It has no date
+  target when more than `COLLECTIVE_SLACK` is still missing. The count can
+  include one posting listed twice, so repeats in the last walk are
+  subtracted before anything is called missing. Postings it copies from
+  Free-Work end in "(IT) / Freelance", which is stripped from the title. It has no date
   sort and caps `total` at `COLLECTIVE_CAP`. Its alert emails name no posting at all; only its
   "new opportunity" emails do, and every link in them except the public
   `www.collective.work/jobs/<lang>/<slug>` page is a per-member
