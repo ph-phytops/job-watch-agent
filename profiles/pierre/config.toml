@@ -45,7 +45,9 @@ include_keywords = [
 # passé de 16 à 305 correspondances). Les postes GTM de ces sociétés sont
 # aux États-Unis ; en chercher en France demanderait d'autres cibles.
 # ...and none of these.
-exclude_keywords = ["intern", "internship", "stage", "alternance", "apprentice", "stagiaire"]
+# "alternant" is not a substring of "alternance", and it is the word titles
+# use ("Alternant(e) Chef de projet ..."): two such postings were getting in.
+exclude_keywords = ["intern", "internship", "stage", "alternance", "alternant", "apprentice", "stagiaire"]
 
 # --- Email alerts ------------------------------------------------------
 # The agent also reads a dedicated mailbox receiving daily job alerts.
@@ -233,6 +235,13 @@ slug = "chef de projet data?contractType=Freelance&days=60"
 # list in this file says "Capacity Delivery", and that phrase scored nothing.
 "delivery" = 15
 "freelance" = 10
+# Data project management is a lane of its own since the Collective search
+# was added, and "data" alone scored nothing: "Chef de projet Data senior"
+# ranked 30th behind unrelated infrastructure postings. Only titles that
+# already passed the title filter are scored, so "data" here reaches project
+# and programme roles, not data engineering. Measured on 453 open postings:
+# 47 gain points, none outside the lane rises above 50.
+"data" = 15
 "cloud" = 10
 "project manager" = 10
 "senior" = 5
