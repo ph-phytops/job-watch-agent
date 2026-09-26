@@ -15,6 +15,7 @@ import email
 import imaplib
 import re
 import unicodedata
+from email.header import decode_header, make_header
 from email.message import Message
 from urllib.parse import quote_plus, unquote
 from zoneinfo import ZoneInfo
@@ -43,6 +44,7 @@ _CARD_SEPARATOR = " · "
 # employer, kept in one place because it is also the fallback the card parser
 # is allowed to overwrite.
 _INDEED_SOURCE = "Indeed (alerte email)"
+_COLLECTIVE_SOURCE = "Collective (alerte email)"
 
 # An Indeed alert link that carries no posting id. A recurring alert links
 # straight to the posting; the letter confirming a newly created alert routes
@@ -110,7 +112,9 @@ def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
         f"(SINCE {since_imap})"
     ]
 
-    html_bodies: list[str] = []
+    # The subject rides along with the body: a Collective "new opportunity"
+    # email names the posting's company there and nowhere in the body.
+    html_bodies: list[tuple[str, str]] = []
     with imaplib.IMAP4_SSL(cfg.get("imap_host", "imap.gmail.com")) as imap:
         imap.login(user, password)
         imap.select("INBOX", readonly=True)
@@ -134,14 +138,14 @@ def fetch_email_jobs(cfg: dict, user: str, password: str) -> list[dict]:
             message = email.message_from_bytes(part[1])
             body = _html_body(message)
             if body:
-                html_bodies.append(body)
+                html_bodies.append((body, _subject(message)))
 
     # Dedupe by canonical URL: one LinkedIn card carries two links to the same
     # posting, an outer one wrapping the whole card and an inner one on the
     # title alone. Only the outer one names the employer and the location.
     jobs: dict[str, dict] = {}
-    for body in html_bodies:
-        for job in _extract_jobs(body):
+    for body, subject in html_bodies:
+        for job in _extract_jobs(body, subject):
             existing = jobs.get(job["url"])
             if existing is None or _richer(job, existing):
                 jobs[job["url"]] = job
@@ -176,6 +180,18 @@ def _richer(candidate: dict, current: dict) -> bool:
     return len(candidate.get("title", "")) > len(current.get("title", ""))
 
 
+def _subject(message: Message) -> str:
+    """The decoded subject line, or "" when it cannot be decoded.
+
+    Same rule as everywhere here: a malformed header degrades to nothing
+    rather than raising, since jobwatch would lose the whole mailbox.
+    """
+    try:
+        return str(make_header(decode_header(message.get("Subject") or "")))
+    except Exception:  # noqa: BLE001, a bad header must not cost the run
+        return ""
+
+
 def _html_body(message: Message) -> str:
     """Return the decoded text/html part of an email, or an empty string."""
     for part in message.walk():
@@ -192,7 +208,7 @@ def _html_body(message: Message) -> str:
     return ""
 
 
-def _extract_jobs(html: str) -> list[dict]:
+def _extract_jobs(html: str, subject: str = "") -> list[dict]:
     """Pull every job link out of one email body."""
     soup = BeautifulSoup(html, "html.parser")
     found = []
@@ -207,6 +223,23 @@ def _extract_jobs(html: str) -> list[dict]:
                 found.append(posting)
             continue
         raw = " ".join(anchor.get_text(" ", strip=True).split())
+        if source == _COLLECTIVE_SOURCE:
+            # Its posting link is labelled "Voir l'offre", which the junk
+            # filter below rightly throws away everywhere else. Until this
+            # branch existed, every Collective email yielded nothing.
+            title = _collective_offer_title(soup)
+            if title:
+                found.append(
+                    {
+                        "company": _collective_sender(subject) or source,
+                        "title": title,
+                        "location": "",
+                        "url": canonical,
+                        "source": source,
+                        "network": "",
+                    }
+                )
+            continue
         if len(raw) < 5 or raw.lower() in _JUNK_TITLES:
             continue
         card = _split_card(anchor, raw)
@@ -490,10 +523,52 @@ def _canonical_url(href: str) -> tuple[str | None, str]:
     match = re.search(r"(https?://(?:www\.)?free-work\.com/[^\s\"'>]*job[^\s\"'>]*)", href)
     if match:
         return match.group(1).split("?")[0], "Free-Work (alerte email)"
-    match = re.search(r"(https?://(?:www\.)?collective\.work/[^\s\"'>]+)", href)
+    # Only the public posting page. Every other deep link in a Collective
+    # email points into app.collective.work, and those addresses are built per
+    # member: the same id comes back in the "apply", "application sent" and
+    # "application seen" emails of one account, so it identifies the mailbox
+    # owner and must never reach the memory the repository publishes. The
+    # search collector writes this same address, so both routes agree on it.
+    # The language segment is dropped for /fr/: the slug is the posting's
+    # identity, and one posting must have one key whichever language the
+    # member's account happens to be set to.
+    match = re.search(
+        r"https?://(?:www\.)?collective\.work/jobs/[a-z]{2}/([\w-]+)", href
+    )
     if match:
-        url = match.group(1).split("?")[0]
-        # Skip navigation links (homepage, login...), keep deep mission links.
-        if len(url.rstrip("/").split("/")) > 4:
-            return url, "Collective (alerte email)"
+        return (
+            f"https://www.collective.work/jobs/fr/{match.group(1)}",
+            _COLLECTIVE_SOURCE,
+        )
     return None, ""
+
+
+def _collective_offer_title(soup: BeautifulSoup) -> str:
+    """The title a Collective "new opportunity" email announces.
+
+    Its only link to the posting is labelled "Voir l'offre", which is
+    navigation, and the title sits in the text above it: "Offre : <title>
+    Postuler Voir l'offre". One offer per email, so the first match is it.
+    """
+    text = " ".join(soup.get_text(" ", strip=True).split())
+    match = re.search(r"Offre\s*:\s*(.+?)\s+(?:Postuler|Voir l['’]offre)\b", text)
+    return match.group(1).strip() if match else ""
+
+
+def _collective_sender(subject: str) -> str:
+    """The company in a "[Member x Company] Nouvelle opportunité" subject.
+
+    Only what follows the " x " is kept: what precedes it is the member's own
+    first name. Searched, not anchored, because a forwarded copy prefixes the
+    subject ("TR : [...]", "Fwd: [...]"). A sender that spells itself with a
+    dot between every letter ("A.c.m.e.") is undone; a real dotted name such
+    as "Example.com" has more than one letter between its dots and is left.
+    """
+    match = re.search(r"\[[^\]]*?\sx\s+([^\]]+?)\s*\]", subject or "")
+    if not match:
+        return ""
+    # A folded header keeps its line break inside the name.
+    name = " ".join(match.group(1).split())
+    if re.fullmatch(r"(?:\w\.)+\w?", name):
+        name = name.replace(".", "")
+    return name
