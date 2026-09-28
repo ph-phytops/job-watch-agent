@@ -37,6 +37,16 @@ include_keywords = [
     "delivery lead",
     "deployment lead",
     "deployment manager",
+    # The pre-construction titles of the data-centre trade (land, permits,
+    # grid and fibre before a site is built). No key above reached them:
+    # "Project Development Manager" contains neither "project manager" nor
+    # "program". "development manager" alone would let every "Business
+    # Development Manager" in, hence the two longer forms. Measured on 7254
+    # real postings (every board plus 30 days of alerts): 5 more kept, none
+    # lost. No title weight: the data-centre ones already reach the reading
+    # floor on "data center", and a weight would only reorder them.
+    "project development",
+    "land development",
 ]
 # Adjacence GTM technique (solutions architect, forward deployed, technical
 # account, partnerships) testée le 01/09 puis retirée le 02/09 : sur les 14
