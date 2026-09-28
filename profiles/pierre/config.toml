@@ -57,7 +57,13 @@ include_keywords = [
 # ...and none of these.
 # "alternant" is not a substring of "alternance", and it is the word titles
 # use ("Alternant(e) Chef de projet ..."): two such postings were getting in.
-exclude_keywords = ["intern", "internship", "stage", "alternance", "alternant", "apprentice", "stagiaire"]
+# "intern" on its own also matched "international", "internal" and "interne":
+# six project manager postings were dropped on that. The four forms below keep
+# out an internship written "Intern (...)", "Intern - ...", "Intern, ...",
+# "(Intern)" or "Intern/...". A title ending on the bare word "Intern" gets
+# through: no substring tells it apart from "International". Measured on 7254
+# real postings: 6 kept again, none lost, 1 internship let in.
+exclude_keywords = ["intern ", "intern,", "intern)", "intern/", "internship", "stage", "alternance", "alternant", "apprentice", "stagiaire"]
 
 # --- Email alerts ------------------------------------------------------
 # The agent also reads a dedicated mailbox receiving daily job alerts.
