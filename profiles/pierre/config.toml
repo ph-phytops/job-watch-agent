@@ -288,13 +288,103 @@ slug = "chef de projet data?contractType=Freelance&contractTypes[]=FREELANCE_CON
 "remote" = 30
 "à distance" = 30
 "télétravail" = 25
-"paris" = 25
-"france" = 20
 "emea" = 15
 "europe" = 15
-"hybride" = 10
 "london" = 5
 "amsterdam" = 5
+
+# France is scored by commute, not by country, in four steps: Paris and the
+# La Défense business district 25, the inner suburbs 15, the outer ones 10,
+# anywhere else in France 5. While "france" was worth 20, one step below
+# "paris", a mission in Blois ranked next to one in Paris: on 28/09, 8 of the
+# 20 postings a review read were outside the region. The work mode is no
+# longer scored: "hybride" at 10 had no city behind it, so it only ever
+# lifted the distant postings that no city key recognised.
+"paris" = 25
+"la défense" = 25
+"la defense" = 25
+"puteaux" = 25
+"courbevoie" = 25
+"nanterre" = 25
+"la garenne-colombes" = 25
+
+# Inner suburbs. Indeed writes the département in brackets, the other sources
+# write the commune, so both are listed. A commune goes in by bare name only
+# when no other French place contains that name: "boulogne" would catch
+# Boulogne-sur-Mer, "saint-denis" the prefecture of La Réunion, "sèvres" the
+# Deux-Sèvres, and "montreuil" Cormontreuil, which the corpus did contain.
+# Those are written with their postal code or their region instead.
+"(92)" = 15
+"(93)" = 15
+"(94)" = 15
+"boulogne-billancourt" = 15
+"issy-les-moulineaux" = 15
+"levallois" = 15
+"neuilly-sur-seine" = 15
+"clichy" = 15               # Clichy and Clichy-sous-Bois, both inner
+"asnières-sur-seine" = 15
+"colombes" = 15             # Colombes and Bois-Colombes
+"gennevilliers" = 15
+"villeneuve-la-garenne" = 15
+"rueil-malmaison" = 15
+"suresnes" = 15
+"malakoff" = 15
+"montrouge" = 15
+"vanves" = 15
+"clamart" = 15
+"meudon" = 15
+"antony" = 15
+"plessis-robinson" = 15
+"saint-ouen-sur-seine" = 15
+"saint-ouen, île-de-france" = 15
+"93400 saint-ouen" = 15
+"saint-denis, île-de-france" = 15
+"93200 saint-denis" = 15
+"93210 saint-denis" = 15
+"plaine saint-denis" = 15
+"montreuil, île-de-france" = 15
+"93100 montreuil" = 15
+"aubervilliers" = 15
+"pantin" = 15
+"bagnolet" = 15
+"bobigny" = 15
+"noisy-le-grand" = 15
+"rosny-sous-bois" = 15
+"ivry-sur-seine" = 15
+"vitry-sur-seine" = 15
+"villejuif" = 15
+"kremlin-bic" = 15          # Le Kremlin-Bicêtre, accent or not
+"gentilly" = 15
+"arcueil" = 15
+"cachan" = 15
+"charenton-le-pont" = 15
+"saint-mandé" = 15
+"vincennes" = 15
+"maisons-alfort" = 15
+"alfortville" = 15
+"créteil" = 15
+"fontenay-sous-bois" = 15
+"nogent-sur-marne" = 15
+"rungis" = 15
+"thiais" = 15
+"choisy-le-roi" = 15
+
+# Outer suburbs, and the region named without its commune.
+"(77)" = 10
+"(78)" = 10
+"(91)" = 10
+"(95)" = 10
+"île-de-france" = 10
+"ile-de-france" = 10
+", idf" = 10                # "Pontoise, IDF, France", as SmartRecruiters writes it
+"france" = 5
+
+# Places whose name contains "paris" without being Paris, brought back to the
+# outer-suburb level. Without these, Villeparisis scored as Paris.
+"villeparisis" = -15
+"en-parisis" = -15          # Cormeilles-en-Parisis, Fontenay-en-Parisis
+"paris-saclay" = -15
+"disneyland" = -15
 
 # Out of reach, so out of the reading slots. These only started working with
 # the scoring change: while a table kept its single best match, "US - Remote"
