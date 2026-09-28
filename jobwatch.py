@@ -541,8 +541,12 @@ def fetch_collective(
     name: one search spans hundreds of companies, most of them agencies
     placing a mission for a client they do not name.
 
-    The listing carries the full description, like Greenhouse with content,
-    so there is nothing left to fetch under --llm.
+    The listing carries the description but not the required profile: a
+    posting written on Collective keeps its requirements in a field that only
+    its own page serves, and judged without it a mission loses its first
+    requirement. So `content` is accepted and ignored, as for SmartRecruiters
+    and Workday, and fill_missing_descriptions() reads each finalist's page
+    under --llm.
 
     The walk is bounded by the count, never by the shape of a page. Nothing in
     the request fixes the page size, so "a short page is the end" would read a
@@ -623,7 +627,7 @@ def fetch_collective(
         # old", and a renamed field would then empty the whole target.
         if oldest and published and published < oldest:
             continue
-        job = _collective_job(company, project, content)
+        job = _collective_job(company, project, False)
         jobs.setdefault(job["url"], job)
     return list(jobs.values())
 
@@ -761,8 +765,16 @@ def _collective_job(company: str, project: dict, content: bool) -> dict:
             if project.get("contractTypes") else "",
             f"Published: {(project.get('publishedAt') or '')[:10]}",
         ]
+        # The requirements have their own field, which only the posting page
+        # serves. They go ahead of the description, labelled, so the review's
+        # length cap can only ever cut the description and never them.
+        profile = _plain_text(project.get("profileWanted") or "")
+        labelled = (
+            ["Required profile:", profile, "Description:"] if profile else []
+        )
         text = "\n".join(
             [fact for fact in facts if fact]
+            + labelled
             + [_plain_text(project.get("description", ""))]
         )
     return {
@@ -862,10 +874,11 @@ def fetch_workday_description(url: str) -> str:
 def fetch_description(url: str) -> str:
     """Full text of a posting whose listing did not carry one.
 
-    Three sources need this and they are unrelated: an email alert hands over
-    a title and a link, and the SmartRecruiters and Workday boards both keep
-    their descriptions one request away from the listing. An email alert is
-    read at whichever site its link points to.
+    Four sources need this and they are unrelated: an email alert hands over
+    a title and a link, the SmartRecruiters and Workday boards both keep
+    their descriptions one request away from the listing, and a Collective
+    search leaves out the required profile. An email alert is read at
+    whichever site its link points to.
     """
     if "smartrecruiters.com" in url:
         return fetch_smartrecruiters_description(url)
@@ -877,10 +890,11 @@ def fetch_description(url: str) -> str:
 
 
 def fetch_collective_description(url: str) -> str:
-    """Full text of a Collective posting that arrived by email.
+    """Full text of a Collective posting, read from its own page.
 
-    The search collector already carries the description; this is for the
-    "new opportunity" emails, which carry a title and a link and nothing else.
+    Both routes need it: the "new opportunity" emails carry a title and a link
+    and nothing else, and the search carries the description without the
+    required profile.
     """
     project = _collective_next_data(url).get("project")
     if not project:
@@ -893,10 +907,11 @@ def fetch_collective_description(url: str) -> str:
 def fill_missing_descriptions(jobs: list[dict]) -> int:
     """Fetch the description of finalists that arrived without one.
 
-    Email-sourced and SmartRecruiters postings are the ones that get here
-    empty-handed. A failure is reported and skipped: reviewing one posting on
-    its title is worse than reviewing it in full, and far better than aborting
-    the run.
+    Email-sourced postings get here empty-handed, and so do the
+    SmartRecruiters, Workday and Collective ones, whose listings leave the
+    full text on each posting's page. A failure is reported and skipped:
+    reviewing one posting on its title is worse than reviewing it in full,
+    and far better than aborting the run.
     """
     fetched = 0
     for job in jobs:
@@ -1599,8 +1614,8 @@ def main() -> int:
                   f"(listed at the top of the report).")
         fetched = fill_missing_descriptions(top)
         if fetched:
-            print(f"  {fetched} of them read from LinkedIn "
-                  f"(email alerts carry no description).")
+            print(f"  {fetched} of them read from their own posting page "
+                  f"(their listing carried no full text).")
         verdicts = review(top, llm_cfg, load_profile(llm_cfg, BASE))
         today = dt.datetime.now(ZoneInfo("Europe/Paris")).date().isoformat()
         path = _free_report_path(today)

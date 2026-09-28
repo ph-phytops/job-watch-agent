@@ -65,8 +65,10 @@ Four stages, all driven from `main()` in `jobwatch.py`:
    per posting away from the listing, so they accept `content` and ignore
    it, and `fetch_description()` reads their finalists under `--llm`.
    Collective is not a board but a public search of a freelance
-   marketplace: its listing carries the description, and each posting keeps
-   the company it names rather than the target's `name`.
+   marketplace: its listing carries the description but not the required
+   profile, which only the posting page serves, so it too accepts `content`
+   and ignores it, and each posting keeps the company it names rather than
+   the target's `name`.
    `email_collector.fetch_email_jobs` is a parallel collector reading a
    dedicated IMAP mailbox of job alerts.
 2. **Normalise**: every collector returns the same four-key shape
@@ -249,7 +251,11 @@ nothing open rather than as an error:
   sort and caps `total` at `COLLECTIVE_CAP`. Its alert emails name no posting at all; only its
   "new opportunity" emails do, and every link in them except the public
   `www.collective.work/jobs/<lang>/<slug>` page is a per-member
-  `app.collective.work` address that must never reach `seen.json`.
+  `app.collective.work` address that must never reach `seen.json`. A
+  posting written on Collective keeps its requirements in a separate
+  `profileWanted` field that the search never carries: judged from the
+  listing, a mission loses its first requirement, so every finalist is read
+  again from its page, with the requirements put ahead of the description.
 
 ### Configuration and secrets
 
