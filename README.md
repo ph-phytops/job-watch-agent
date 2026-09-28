@@ -128,7 +128,7 @@ checkout can serve several people:
    `jobs.smartrecruiters.com/<slug>`, or
    `<tenant>.<dc>.myworkdayjobs.com/<site>`, whose slug is written
    `tenant/dc/site`; a Collective target is a search instead, written
-   `search text?contractType=Freelance&days=60`), their title keywords and
+   `search text?contractTypes[]=FREELANCE_CONTRACT&days=60`), their title keywords and
    the scoring weights.
 2. **`.env`**: a dedicated Gmail mailbox receiving their job alerts
    (LinkedIn/Indeed subscriptions or forwards), an app password, and the

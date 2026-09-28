@@ -503,7 +503,17 @@ COLLECTIVE_PACE = 0.5
 # The URL options the search honours, measured one by one. `sort` is not among
 # them, and neither is a page size: the site serves 30 per page, and nothing
 # in the request can hold it there.
-COLLECTIVE_OPTIONS = ("contractType", "hasDailyRate", "exclusive")
+COLLECTIVE_OPTIONS = (
+    "contractType", "contractTypes[]", "hasDailyRate", "exclusive"
+)
+# The contract filter has two spellings. A feature flag on the site moved it
+# from one value (contractType=Freelance) to a list of groups
+# (contractTypes[]=FREELANCE_CONTRACT, which covers FREELANCE and CONTRACT):
+# while the flag is on, contractType is forced back to "All" and only the list
+# counts; while it is off, the list is ignored. It flipped between two runs a
+# few hours apart. A slug may carry both, and the filter holds when the site
+# honoured either one.
+COLLECTIVE_CONTRACT = ("contractType", "contractTypes[]")
 # Postings the walk may miss before it is treated as broken rather than as
 # relevance noise. The order is relevance only and reshuffles ties between two
 # identical requests, so a posting can slide across a page boundary between two
@@ -533,9 +543,10 @@ def fetch_collective(
 
     The slug is the search text, optionally followed by the options the site
     honours plus one of our own, the way a Workday slug carries its countries:
-    "chef de projet data?contractType=Freelance&days=60". `days` drops what was
-    published longer ago than that. The search is ordered by relevance and has
-    no date sort, so it serves missions from months ago next to this morning's.
+    "chef de projet data?contractTypes[]=FREELANCE_CONTRACT&days=60". `days`
+    drops what was published longer ago than that. The search is ordered by
+    relevance and has no date sort, so it serves missions from months ago next
+    to this morning's.
 
     The employer of each posting is the one the posting names, not the target
     name: one search spans hundreds of companies, most of them agencies
@@ -708,11 +719,35 @@ def _collective_check_echo(echoed: dict, search: str, options: dict) -> None:
         raise RuntimeError(
             f"site ignored the search {search!r}; its URL parameters changed"
         )
+    honoured = {
+        key: _collective_honoured(echoed, key, value)
+        for key, value in options.items()
+    }
+    contract = [key for key in COLLECTIVE_CONTRACT if key in options]
+    if contract and not any(honoured[key] for key in contract):
+        asked = " or ".join(f"{key}={options[key]}" for key in contract)
+        raise RuntimeError(
+            f"site ignored the contract filter {asked} (ran contractType="
+            f"{echoed.get('contractType')!r}, contractTypes="
+            f"{echoed.get('contractTypes')!r})"
+        )
     for key, value in options.items():
-        if str(echoed.get(key)).casefold() != value.casefold():
+        if key not in COLLECTIVE_CONTRACT and not honoured[key]:
             raise RuntimeError(
                 f"site ignored {key}={value} (ran {key}={echoed.get(key)!r})"
             )
+
+
+def _collective_honoured(echoed: dict, key: str, value: str) -> bool:
+    """Whether the query the site echoes carries one option as asked.
+
+    A key ending in [] is a list on the site's side, honoured when the list
+    holds the value; any other key is compared as a single value.
+    """
+    if key.endswith("[]"):
+        ran = echoed.get(key[:-2]) or []
+        return value.casefold() in [str(item).casefold() for item in ran]
+    return str(echoed.get(key)).casefold() == value.casefold()
 
 
 def _collective_next_data(url: str) -> dict:

@@ -239,7 +239,11 @@ nothing open rather than as an error:
   parameter it does not know, serving its default listing (every posting it
   holds) instead of the search. The query the page echoes back in its
   `__NEXT_DATA__` is therefore compared with the one asked for before
-  anything is kept. It pages by 30 but nothing in the request fixes that
+  anything is kept. Its contract filter has two spellings behind a feature
+  flag, `contractType=Freelance` and `contractTypes[]=FREELANCE_CONTRACT`:
+  with the flag on, the first is forced back to "All" and only the list
+  counts, so a slug writes both and the check accepts whichever the site
+  honoured. It pages by 30 but nothing in the request fixes that
   size, so the walk is bounded by the `total` served on every page, never by
   a short page: it stops on the count or on a page that adds nothing new,
   walks once more when postings are missing (relevance order reshuffles ties

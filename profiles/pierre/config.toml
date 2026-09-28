@@ -204,11 +204,12 @@ slug = "equinix/wd1/External?countries=France"
 # relevance and serves missions from months back next to today's, so days=
 # drops anything published longer ago than that. Its alert emails cannot
 # stand in for this: they count the new postings and link to the logged-in
-# app, without naming a single one.
+# app, without naming a single one. The contract filter is written in both
+# of the site's spellings: a feature flag decides which one it honours.
 [[companies]]
 name = "Collective"
 ats = "collective"
-slug = "chef de projet data?contractType=Freelance&days=60"
+slug = "chef de projet data?contractType=Freelance&contractTypes[]=FREELANCE_CONTRACT&days=60"
 
 
 # Google, Microsoft, AWS and Meta have proprietary career sites without a
