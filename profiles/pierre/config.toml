@@ -134,6 +134,13 @@ name = "Nscale"
 ats = "greenhouse"
 slug = "nscaleoperationsukltd"
 
+# GPU-as-a-service provider. Its board sits on Greenhouse's EU instance,
+# which the public boards API serves like any other.
+[[companies]]
+name = "Radian Arc"
+ats = "greenhouse"
+slug = "radianarc"
+
 [[companies]]
 name = "Fireworks AI"
 ats = "ashby"
@@ -289,6 +296,7 @@ slug = "chef de projet data?contractType=Freelance&contractTypes[]=FREELANCE_CON
 "Databricks" = 22
 "Lambda" = 20
 "Nscale" = 20
+"Radian Arc" = 20
 "Google" = 20
 "Microsoft" = 18
 "Meta" = 18
