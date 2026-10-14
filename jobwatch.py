@@ -837,29 +837,64 @@ FETCHERS = {
 }
 
 
+# LinkedIn throttles logged-out reads in short bursts. Measured on one posting
+# read every thirty seconds: 200, then 429 at thirty and at sixty seconds, then
+# 200 again at ninety, and never a Retry-After header to say how long to wait.
+# Giving up on the first 429 sent finalists to the model on their titles alone,
+# so a 429 is retried after each of these pauses, in seconds.
+LINKEDIN_RETRY_WAITS = (30, 60, 120)
+
+
+class LinkedInThrottled(RuntimeError):
+    """LinkedIn kept answering 429 through every retry."""
+
+
 def fetch_linkedin_description(url: str) -> str:
     """Full text of a LinkedIn posting, or "" when it cannot be read.
 
     An ATS hands over the description with the listing; an email alert hands
     over a title and a link, so without this the qualitative pass would judge
     half of a mailbox-driven profile on its titles alone. LinkedIn serves the
-    posting to logged-out visitors at the endpoint below, which we call under
+    posting to logged-out visitors at the endpoints below, which we call under
     this project's own user agent, once per finalist, on demand and never in
     CI. Indeed answers 401 to the same request and stays title-only.
+
+    A 429 is retried after LINKEDIN_RETRY_WAITS, and LinkedInThrottled is
+    raised once they are spent. Any other HTTP error is raised at once: a
+    posting that is gone does not come back by waiting.
     """
     match = re.search(r"linkedin\.com/jobs/view/(\d+)", url)
     if not match:
         return ""
-    guest = (
-        "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/"
-        f"{match.group(1)}"
+    job_id = match.group(1)
+    # Two doors to the same text. The public page kept serving it on a day the
+    # guest endpoint refused for half an hour, and on another day both refused
+    # together, so each retry knocks on the other one rather than counting on it.
+    routes = (
+        f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}",
+        f"https://www.linkedin.com/jobs/view/{job_id}/",
     )
-    response = requests.get(guest, headers=HEADERS, timeout=TIMEOUT)
-    response.raise_for_status()
-    body = BeautifulSoup(response.text, "html.parser").select_one(
-        "div.show-more-less-html__markup, div.description__text"
+    for attempt, wait in enumerate((0, *LINKEDIN_RETRY_WAITS)):
+        if wait:
+            print(
+                f"  [~] LinkedIn answered 429 for posting {job_id}, "
+                f"retry {attempt}/{len(LINKEDIN_RETRY_WAITS)} in {wait}s..."
+            )
+            time.sleep(wait)
+        response = requests.get(
+            routes[attempt % len(routes)], headers=HEADERS, timeout=TIMEOUT
+        )
+        if response.status_code == 429:
+            continue
+        response.raise_for_status()
+        body = BeautifulSoup(response.text, "html.parser").select_one(
+            "div.show-more-less-html__markup, div.description__text"
+        )
+        return body.get_text("\n", strip=True) if body else ""
+    raise LinkedInThrottled(
+        f"LinkedIn still answered 429 after {len(LINKEDIN_RETRY_WAITS)} "
+        f"retries over {sum(LINKEDIN_RETRY_WAITS)}s"
     )
-    return body.get_text("\n", strip=True) if body else ""
 
 
 def fetch_smartrecruiters_description(url: str) -> str:
@@ -947,13 +982,29 @@ def fill_missing_descriptions(jobs: list[dict]) -> int:
     full text on each posting's page. A failure is reported and skipped:
     reviewing one posting on its title is worse than reviewing it in full,
     and far better than aborting the run.
+
+    Once LinkedIn has outlasted its retries, the remaining LinkedIn postings
+    are not asked for at all. Short bursts clear within the retries; one that
+    does not is the long kind, which has run past half an hour, and asking
+    again for each finalist would only spend minutes to get the same 429.
     """
     fetched = 0
+    throttled = False
     for job in jobs:
         if job.get("content"):
             continue
+        if throttled and "linkedin.com/" in job["url"]:
+            print(
+                f"  [!] no description for {job['title'][:40]}: "
+                "LinkedIn is still throttling, not asked again this run"
+            )
+            continue
         try:
             job["content"] = fetch_description(job["url"])
+        except LinkedInThrottled as exc:
+            throttled = True
+            print(f"  [!] no description for {job['title'][:40]}: {exc}")
+            continue
         except Exception as exc:  # noqa: BLE001, report and move on
             print(f"  [!] no description for {job['title'][:40]}: {exc}")
             continue
